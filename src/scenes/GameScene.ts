@@ -1,8 +1,19 @@
 import Phaser from "phaser";
 
+type Direction =
+  | "south"
+  | "south-west"
+  | "west"
+  | "north-west"
+  | "north"
+  | "north-east"
+  | "east"
+  | "south-east";
+
 export class GameScene extends Phaser.Scene {
-  private player!: Phaser.GameObjects.Rectangle;
+  private player!: Phaser.GameObjects.Sprite;
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
+  private facing: Direction = "south";
   private speed = 200;
 
   constructor() {
@@ -10,12 +21,13 @@ export class GameScene extends Phaser.Scene {
   }
 
   create() {
-    // Placeholder player (cyan rectangle until we have sprites)
-    this.player = this.add.rectangle(400, 300, 24, 32, 0x00ffff);
-    this.physics.add.existing(this.player);
-
-    // Isometric grid placeholder
+    // Isometric grid
     this.drawIsoGrid();
+
+    // Player sprite
+    this.player = this.add.sprite(400, 300, "player-south");
+    this.player.setScale(2); // Scale up 48px sprite for visibility
+    this.physics.add.existing(this.player);
 
     // Title text
     this.add
@@ -42,18 +54,35 @@ export class GameScene extends Phaser.Scene {
     const body = this.player.body as Phaser.Physics.Arcade.Body;
     body.setVelocity(0);
 
-    // Isometric-style movement: up/down moves along Y, left/right along X
-    if (this.cursors.left.isDown) {
-      body.setVelocityX(-this.speed);
-    } else if (this.cursors.right.isDown) {
-      body.setVelocityX(this.speed);
-    }
+    let dx = 0;
+    let dy = 0;
 
-    if (this.cursors.up.isDown) {
-      body.setVelocityY(-this.speed);
-    } else if (this.cursors.down.isDown) {
-      body.setVelocityY(this.speed);
+    if (this.cursors.left.isDown) dx = -1;
+    else if (this.cursors.right.isDown) dx = 1;
+
+    if (this.cursors.up.isDown) dy = -1;
+    else if (this.cursors.down.isDown) dy = 1;
+
+    if (dx !== 0 || dy !== 0) {
+      this.facing = this.getDirection(dx, dy);
+      this.player.setTexture(`player-${this.facing}`);
+
+      // Normalize diagonal speed
+      const len = Math.sqrt(dx * dx + dy * dy);
+      body.setVelocity((dx / len) * this.speed, (dy / len) * this.speed);
     }
+  }
+
+  private getDirection(dx: number, dy: number): Direction {
+    if (dx === 0 && dy === -1) return "north";
+    if (dx === 1 && dy === -1) return "north-east";
+    if (dx === 1 && dy === 0) return "east";
+    if (dx === 1 && dy === 1) return "south-east";
+    if (dx === 0 && dy === 1) return "south";
+    if (dx === -1 && dy === 1) return "south-west";
+    if (dx === -1 && dy === 0) return "west";
+    if (dx === -1 && dy === -1) return "north-west";
+    return this.facing;
   }
 
   private drawIsoGrid() {

@@ -25,26 +25,31 @@ export class GameScene extends Phaser.Scene {
     this.drawIsoGrid();
 
     // Player sprite
-    this.player = this.add.sprite(400, 300, "player-south");
+    this.player = this.add.sprite(480, 270, "player-south");
     this.player.setScale(2); // Scale up 48px sprite for visibility
     this.physics.add.existing(this.player);
 
-    // Title text
-    this.add
-      .text(400, 32, "C Y B E R D A S H", {
-        fontFamily: "monospace",
-        fontSize: "24px",
-        color: "#00ffff",
-      })
-      .setOrigin(0.5);
+    // Title text (high resolution so it stays crisp when canvas scales)
+    const dpr = window.devicePixelRatio || 1;
 
     this.add
-      .text(400, 64, "Arrow keys to move", {
-        fontFamily: "monospace",
-        fontSize: "12px",
+      .text(480, 24, "CYBERDASH", {
+        fontFamily: "Arial, Helvetica, sans-serif",
+        fontSize: "20px",
+        color: "#00ffff",
+        fontStyle: "bold",
+      })
+      .setOrigin(0.5)
+      .setResolution(dpr);
+
+    this.add
+      .text(480, 52, "Arrow keys to move", {
+        fontFamily: "Arial, Helvetica, sans-serif",
+        fontSize: "10px",
         color: "#666666",
       })
-      .setOrigin(0.5);
+      .setOrigin(0.5)
+      .setResolution(dpr);
 
     // Input
     this.cursors = this.input.keyboard!.createCursorKeys();
@@ -65,11 +70,20 @@ export class GameScene extends Phaser.Scene {
 
     if (dx !== 0 || dy !== 0) {
       this.facing = this.getDirection(dx, dy);
-      this.player.setTexture(`player-${this.facing}`);
+
+      // Play walk animation
+      const animKey = `walk-${this.facing}`;
+      if (this.player.anims.currentAnim?.key !== animKey) {
+        this.player.play(animKey);
+      }
 
       // Normalize diagonal speed
       const len = Math.sqrt(dx * dx + dy * dy);
       body.setVelocity((dx / len) * this.speed, (dy / len) * this.speed);
+    } else {
+      // Stop animation and show idle frame
+      this.player.stop();
+      this.player.setTexture(`player-${this.facing}`);
     }
   }
 
@@ -92,8 +106,8 @@ export class GameScene extends Phaser.Scene {
     const tileWidth = 64;
     const tileHeight = 32;
     const gridSize = 15;
-    const offsetX = 400;
-    const offsetY = 200;
+    const offsetX = 480;
+    const offsetY = 170;
 
     for (let row = 0; row < gridSize; row++) {
       for (let col = 0; col < gridSize; col++) {

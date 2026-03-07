@@ -1,6 +1,6 @@
 import Phaser from "phaser";
 
-const PLAYER_DIRECTIONS = [
+export const DIRECTIONS = [
   "south",
   "south-west",
   "west",
@@ -9,7 +9,7 @@ const PLAYER_DIRECTIONS = [
   "north-east",
   "east",
   "south-east",
-];
+] as const;
 
 export class BootScene extends Phaser.Scene {
   constructor() {
@@ -17,12 +17,26 @@ export class BootScene extends Phaser.Scene {
   }
 
   preload() {
-    for (const dir of PLAYER_DIRECTIONS) {
+    for (const dir of DIRECTIONS) {
       this.load.image(`player-${dir}`, `assets/sprites/player/${dir}.png`);
+      this.load.spritesheet(`walk-${dir}`, `assets/sprites/player/walk-${dir}.png`, {
+        frameWidth: 48,
+        frameHeight: 48,
+      });
     }
   }
 
   create() {
+    // Create walk animations for each direction
+    for (const dir of DIRECTIONS) {
+      this.anims.create({
+        key: `walk-${dir}`,
+        frames: this.anims.generateFrameNumbers(`walk-${dir}`, { start: 0, end: 5 }),
+        frameRate: 10,
+        repeat: -1,
+      });
+    }
+
     this.scene.start("GameScene");
   }
 }

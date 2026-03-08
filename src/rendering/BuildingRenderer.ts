@@ -106,7 +106,7 @@ export function renderBuilding(
     }
   }
 
-  // Door on SE wall (near S vertex)
+  // Door on SE wall (left = near S vertex, right = near E vertex)
   const seFace: WallFaceGeometry = {
     baseX: S.x,
     baseY: S.y,
@@ -114,7 +114,11 @@ export function renderBuilding(
     slope: -0.5,
     wallHeight,
   };
-  const doorPoints = wallFeatureRect(seFace, 2, 0, 28, STORY_HEIGHT * 0.75);
+  const doorWidth = 48;
+  const seWallLen = E.x - S.x;
+  const doorMargin = building.doorInset;
+  const doorAlong = building.doorSide === "left" ? doorMargin : seWallLen - doorWidth - doorMargin;
+  const doorPoints = wallFeatureRect(seFace, doorAlong, 0, doorWidth, STORY_HEIGHT * 0.75);
   const doorGfx = scene.add.graphics();
   doorGfx.setDepth(depth + 0.5);
   doorGfx.fillStyle(0xff0000, 1);

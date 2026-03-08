@@ -288,6 +288,7 @@ export class GameScene extends Phaser.Scene {
           const inset = 0.2 + Math.random() * 0.6;
           const heightOffset = Math.floor(Math.random() * 60);
           const doorSide = Math.random() < 0.5 ? "left" as const : "right" as const;
+          const doorInset = 10 + Math.floor(Math.random() * 30);
           const rowStart = baseRow + rowOffset;
           const rowEnd = Math.min(baseRow + rowOffset + depth - 1, this.mapRows - 1);
 
@@ -302,6 +303,7 @@ export class GameScene extends Phaser.Scene {
             inset,
             heightOffset,
             doorSide,
+            doorInset,
           });
 
           rowOffset += depth;

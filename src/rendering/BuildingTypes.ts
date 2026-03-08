@@ -17,6 +17,7 @@ export interface Building {
   inset: number;       // fractional tile inset from sidewalk (0.2-0.8)
   heightOffset: number; // random pixel offset added to base story height
   doorSide: "left" | "right";
+  doorInset: number;   // pixels inset from wall edge
 }
 
 // Dark cyberpunk color palette — base hues with consistent lighting

@@ -418,16 +418,36 @@ export class GameScene extends Phaser.Scene {
               : (colMod >= 7 && colMod <= 10) || (colMod >= 21 && colMod <= 23);
 
             if (isCenter && !nearCrosswalk) {
-              const off = 3; // half-gap between the two lines
-              streetLines.lineStyle(2, 0x8b8520, 0.5);
+              // Exactly half tile size — segments connect at tile boundaries with no overlap
+              const ext = 16;
+              const hext = 8;
+              const gap = 2; // perpendicular offset between lines
+              const hw = 1; // vertical half-width of each line
+              streetLines.fillStyle(0x8b8520, 0.5);
               if (inStreetCol) {
-                // Two parallel NW-SE lines offset along NE-SW axis
-                streetLines.lineBetween(x + 17 - off, y - 8 - off * 0.5, x - 17 - off, y + 8 - off * 0.5);
-                streetLines.lineBetween(x + 17 + off, y - 8 + off * 0.5, x - 17 + off, y + 8 + off * 0.5);
+                // Two parallel NW-SE parallelograms offset along NE-SW axis
+                for (const s of [-1, 1]) {
+                  const ox = gap * s;
+                  const oy = gap * s / 2;
+                  streetLines.fillPoints([
+                    new Phaser.Geom.Point(x + ext + ox, y - hext + oy - hw),
+                    new Phaser.Geom.Point(x + ext + ox, y - hext + oy + hw),
+                    new Phaser.Geom.Point(x - ext + ox, y + hext + oy + hw),
+                    new Phaser.Geom.Point(x - ext + ox, y + hext + oy - hw),
+                  ], true);
+                }
               } else {
-                // Two parallel NE-SW lines offset along NW-SE axis
-                streetLines.lineBetween(x - 17 + off, y - 8 - off * 0.5, x + 17 + off, y + 8 - off * 0.5);
-                streetLines.lineBetween(x - 17 - off, y - 8 + off * 0.5, x + 17 - off, y + 8 + off * 0.5);
+                // Two parallel NE-SW parallelograms offset along NW-SE axis
+                for (const s of [-1, 1]) {
+                  const ox = -gap * s;
+                  const oy = gap * s / 2;
+                  streetLines.fillPoints([
+                    new Phaser.Geom.Point(x - ext + ox, y - hext + oy - hw),
+                    new Phaser.Geom.Point(x - ext + ox, y - hext + oy + hw),
+                    new Phaser.Geom.Point(x + ext + ox, y + hext + oy + hw),
+                    new Phaser.Geom.Point(x + ext + ox, y + hext + oy - hw),
+                  ], true);
+                }
               }
             }
 

@@ -1,4 +1,9 @@
 import Phaser from "phaser";
+import { TILE_W, TILE_H, isoToScreen, screenToIso } from "../iso/IsoGeometry";
+import { COL_PERIOD, ROW_PERIOD, BLOCK_INTERIOR, TileType, STORY_HEIGHT } from "../iso/CityLayout";
+import { BuildingTile, BUILDING_PALETTE } from "../rendering/BuildingTypes";
+import { renderBuildingTile } from "../rendering/BuildingRenderer";
+import { renderStreetTile, renderSidewalkTile } from "../rendering/StreetRenderer";
 
 type Direction =
   | "south"
@@ -9,48 +14,6 @@ type Direction =
   | "north-east"
   | "east"
   | "south-east";
-
-// Tile types
-const BUILDING = 0;
-const STREET = 1;
-const SIDEWALK = 2;
-
-// Isometric tile colors: top face, left face, right face
-const TILE_COLORS: Record<number, { top: number; left: number; right: number }> = {
-  [STREET]: { top: 0x2a2a2a, left: 0x222222, right: 0x1a1a1a },
-  [SIDEWALK]: { top: 0x262628, left: 0x202022, right: 0x1a1a1c },
-};
-
-const STREET_LINE = 0x3a3a3a;
-const STORY_HEIGHT = 128;
-const CURB_HEIGHT = 6;
-const COL_PERIOD = 24;
-const ROW_PERIOD = 40;
-
-// Building data per tile (null for non-building tiles)
-interface BuildingTile {
-  stories: number;
-  color: { top: number; left: number; right: number };
-  texture: number; // 0-5, indexes into texture variants
-  inset: number; // fractional tile inset from sidewalk (0.2-0.8)
-  heightOffset: number; // random pixel offset added to base story height
-  doorSide: "left" | "right"; // which end of the SE wall gets the door
-  buildingMaxRow: number; // last row of this building (SE edge)
-}
-
-// Dark cyberpunk color palette — base hues with consistent lighting
-const BUILDING_PALETTE: { top: number; left: number; right: number }[] = [
-  { top: 0x2a2a2a, left: 0x202020, right: 0x181818 }, // dark grey
-  { top: 0x2e2e2e, left: 0x242424, right: 0x1c1c1c }, // medium dark grey
-  { top: 0x232323, left: 0x1a1a1a, right: 0x141414 }, // charcoal
-  { top: 0x282830, left: 0x1e1e26, right: 0x18181e }, // blue-grey
-  { top: 0x2a2a32, left: 0x202028, right: 0x1a1a20 }, // steel grey
-  { top: 0x242832, left: 0x1c1e28, right: 0x161820 }, // slate blue-grey
-  { top: 0x2e2828, left: 0x241e1e, right: 0x1c1818 }, // reddish grey
-  { top: 0x302a2a, left: 0x262020, right: 0x1e1818 }, // warm grey
-  { top: 0x2a2420, left: 0x201c18, right: 0x181410 }, // dark brown
-  { top: 0x2c2622, left: 0x221e1a, right: 0x1a1612 }, // warm brown
-];
 
 export class GameScene extends Phaser.Scene {
   private player!: Phaser.GameObjects.Sprite;
@@ -76,8 +39,6 @@ export class GameScene extends Phaser.Scene {
   private runDrag = 2000;
 
   // Map settings
-  private readonly tileWidth = 64;
-  private readonly tileHeight = 32;
   private readonly mapCols = 72;
   private readonly mapRows = 88;
 
@@ -87,16 +48,15 @@ export class GameScene extends Phaser.Scene {
 
   create() {
     this.cityMap = this.generateCityMap();
-    this.drawCityMap(this.cityMap);
+    this.drawCityMap();
 
-    // Building collision bodies (only where buildingData exists, not inset gaps)
+    // Building collision bodies
     const walls = this.physics.add.staticGroup();
     for (let row = 0; row < this.mapRows; row++) {
       for (let col = 0; col < this.mapCols; col++) {
-        if (this.cityMap[row][col] === BUILDING) {
-          const x = (col - row) * (this.tileWidth / 2);
-          const y = (col + row) * (this.tileHeight / 2);
-          const zone = this.add.zone(x, y, this.tileWidth * 0.45, this.tileHeight * 0.45);
+        if (this.cityMap[row][col] === TileType.BUILDING) {
+          const { x, y } = isoToScreen(col, row);
+          const zone = this.add.zone(x, y, TILE_W * 0.45, TILE_H * 0.45);
           this.physics.add.existing(zone, true);
           walls.add(zone);
         }
@@ -106,8 +66,7 @@ export class GameScene extends Phaser.Scene {
     // Spawn player on a street tile
     const spawnCol = 4 + COL_PERIOD;
     const spawnRow = 4 + ROW_PERIOD;
-    const spawnX = (spawnCol - spawnRow) * (this.tileWidth / 2);
-    const spawnY = (spawnCol + spawnRow) * (this.tileHeight / 2);
+    const { x: spawnX, y: spawnY } = isoToScreen(spawnCol, spawnRow);
 
     this.player = this.add.sprite(spawnX, spawnY, "player-south");
     this.player.setScale(2);
@@ -149,15 +108,13 @@ export class GameScene extends Phaser.Scene {
       .setScrollFactor(0)
       .setDepth(1000);
 
-    // Isometric compass (NW/NE/SW/SE aligned to iso axes)
+    // Isometric compass
     const compass = this.add.graphics();
     compass.setScrollFactor(0);
     compass.setDepth(1000);
     const cx = 900, cy = 60, cLen = 20;
-    // NW-SE axis (vertical-ish on screen: up-left to down-right)
     compass.lineStyle(1, 0x555555);
     compass.lineBetween(cx - cLen, cy - cLen / 2, cx + cLen, cy + cLen / 2);
-    // NE-SW axis
     compass.lineBetween(cx + cLen, cy - cLen / 2, cx - cLen, cy + cLen / 2);
 
     const compassLabel = (text: string, ox: number, oy: number) => {
@@ -227,34 +184,28 @@ export class GameScene extends Phaser.Scene {
       }
     }
 
-    // Depth sort: use sprite bottom (feet) so player stays in front of building walls
-    // until their feet actually cross behind the building edge
+    // Depth sort: use sprite bottom (feet)
     const feetY = this.player.y + this.player.displayHeight / 2;
-    const playerDepth = feetY / (this.tileHeight / 2);
+    const playerDepth = feetY / (TILE_H / 2);
     this.player.setDepth(playerDepth);
 
-    // Hide building chunks when player is behind them (use feet position for iso coords)
-    const pCol = (this.player.x / (this.tileWidth / 2) + feetY / (this.tileHeight / 2)) / 2;
-    const pRow = (feetY / (this.tileHeight / 2) - this.player.x / (this.tileWidth / 2)) / 2;
+    // Hide building chunks when player is behind them
+    const { col: pCol, row: pRow } = screenToIso(this.player.x, feetY);
     const margin = 16;
 
-    // Check if player is on a street/sidewalk (not inside a building)
     const pColInt = Math.floor(pCol);
     const pRowInt = Math.floor(pRow);
     const inBounds = pColInt >= 0 && pColInt < this.mapCols && pRowInt >= 0 && pRowInt < this.mapRows;
-    const onStreet = inBounds && this.cityMap[pRowInt][pColInt] !== BUILDING;
+    const onStreet = inBounds && this.cityMap[pRowInt][pColInt] !== TileType.BUILDING;
 
-    // Determine which block is SE of the player (between player and camera)
     const colMod = ((pColInt % COL_PERIOD) + COL_PERIOD) % COL_PERIOD;
     const rowMod = ((pRowInt % ROW_PERIOD) + ROW_PERIOD) % ROW_PERIOD;
     const playerBlockCol = Math.floor(pCol / COL_PERIOD);
     const playerBlockRow = Math.floor(pRow / ROW_PERIOD);
-    // If player is past the building interior (east/south sidewalk), SE block is next period
     const seBlockCol = colMod >= 22 ? playerBlockCol + 1 : playerBlockCol;
     const seBlockRow = rowMod >= 38 ? playerBlockRow + 1 : playerBlockRow;
 
     for (const chunk of this.buildingChunks) {
-      // Existing NW occlusion (player behind building)
       const nearestCol = Math.max(chunk.minCol, Math.min(chunk.maxCol, pCol));
       const nearestRow = Math.max(chunk.minRow, Math.min(chunk.maxRow, pRow));
       const behind = pCol + pRow < nearestCol + nearestRow;
@@ -262,7 +213,6 @@ export class GameScene extends Phaser.Scene {
       const withinRow = pRow >= chunk.minRow - margin && pRow <= chunk.maxRow;
       const hideBehind = behind && withinCol && withinRow;
 
-      // Hide the entire block SE of the player when on a street/sidewalk
       const isSEBlock = onStreet && chunk.blockCol === seBlockCol && chunk.blockRow === seBlockRow;
 
       const hide = hideBehind || isSEBlock;
@@ -297,15 +247,15 @@ export class GameScene extends Phaser.Scene {
         const inStreetRow = rowMod < 8;
 
         if (inStreetCol || inStreetRow) {
-          map[row][col] = STREET;
+          map[row][col] = TileType.STREET;
         } else {
           const colEdge = colMod <= 9 || colMod >= 22;
           const rowEdge = rowMod <= 9 || rowMod >= 38;
 
           if (colEdge || rowEdge) {
-            map[row][col] = SIDEWALK;
+            map[row][col] = TileType.SIDEWALK;
           } else {
-            map[row][col] = BUILDING;
+            map[row][col] = TileType.BUILDING;
           }
         }
       }
@@ -316,44 +266,34 @@ export class GameScene extends Phaser.Scene {
   }
 
   private generateBuildings(map: number[][]) {
-    // Initialize buildingData with nulls
     this.buildingData = [];
     for (let row = 0; row < this.mapRows; row++) {
       this.buildingData[row] = new Array(this.mapCols).fill(null);
     }
-
-    // Buildings span the full 12-col width and vary in depth along the 28-row axis.
-    // SE side is the storefront; buildings pack NW from there.
-    const blockInteriorRowStart = 10;
-    const blockInteriorRows = 28; // rowMod 10-37
-    const blockInteriorColStart = 10;
-    const blockInteriorColEnd = 21;
 
     const numBlockCols = Math.floor(this.mapCols / COL_PERIOD);
     const numBlockRows = Math.floor(this.mapRows / ROW_PERIOD);
 
     for (let bRow = 0; bRow < numBlockRows; bRow++) {
       for (let bCol = 0; bCol < numBlockCols; bCol++) {
-        const baseCol = bCol * COL_PERIOD + blockInteriorColStart;
-        const baseRow = bRow * ROW_PERIOD + blockInteriorRowStart;
+        const baseCol = bCol * COL_PERIOD + BLOCK_INTERIOR.colStart;
+        const baseRow = bRow * ROW_PERIOD + BLOCK_INTERIOR.rowStart;
 
-        // Split 28 rows into buildings with depths 5-9
-        const depths = this.splitBlockDepth(blockInteriorRows);
+        const depths = this.splitBlockDepth(BLOCK_INTERIOR.rows);
 
         let rowOffset = 0;
         for (const depth of depths) {
           const stories = 2 + Math.floor(Math.random() * 3);
           const color = BUILDING_PALETTE[Math.floor(Math.random() * BUILDING_PALETTE.length)];
           const texture = Math.floor(Math.random() * 6);
-          const inset = 0.2 + Math.random() * 0.6; // fractional tile inset (0.2-0.8)
-          const heightOffset = Math.floor(Math.random() * 60); // 0 to 60 pixels taller
+          const inset = 0.2 + Math.random() * 0.6;
+          const heightOffset = Math.floor(Math.random() * 60);
           const doorSide = Math.random() < 0.5 ? "left" as const : "right" as const;
           const buildingMaxRow = Math.min(baseRow + rowOffset + depth - 1, this.mapRows - 1);
 
-          // Fill all tiles for this building (full col width, varying row depth)
           for (let r = baseRow + rowOffset; r < baseRow + rowOffset + depth; r++) {
-            for (let c = baseCol; c <= bCol * COL_PERIOD + blockInteriorColEnd; c++) {
-              if (r < this.mapRows && c < this.mapCols && map[r][c] === BUILDING) {
+            for (let c = baseCol; c <= bCol * COL_PERIOD + BLOCK_INTERIOR.colEnd; c++) {
+              if (r < this.mapRows && c < this.mapCols && map[r][c] === TileType.BUILDING) {
                 this.buildingData[r][c] = { stories, color, texture, inset, heightOffset, doorSide, buildingMaxRow };
               }
             }
@@ -366,7 +306,6 @@ export class GameScene extends Phaser.Scene {
   }
 
   private splitBlockDepth(total: number): number[] {
-    // Randomly split `total` into segments of 5-9
     const depths: number[] = [];
     let remaining = total;
 
@@ -380,7 +319,7 @@ export class GameScene extends Phaser.Scene {
         break;
       }
 
-      const maxDepth = Math.min(9, remaining - 5); // leave at least 5 for next
+      const maxDepth = Math.min(9, remaining - 5);
       const minDepth = 5;
       const depth = minDepth + Math.floor(Math.random() * (maxDepth - minDepth + 1));
       depths.push(depth);
@@ -390,9 +329,7 @@ export class GameScene extends Phaser.Scene {
     return depths;
   }
 
-  private drawCityMap(map: number[][]) {
-    const ground = this.add.graphics();
-    ground.setDepth(0);
+  private drawCityMap() {
     const sidewalkGfx = this.add.graphics();
     sidewalkGfx.setDepth(0.6);
     const sidewalkLines = this.add.graphics();
@@ -400,82 +337,30 @@ export class GameScene extends Phaser.Scene {
     const streetLines = this.add.graphics();
     streetLines.setDepth(0.5);
 
-    // Group building tiles into small chunks for clean rectangular occlusion
     const chunkSize = 6;
-    const chunkMap = new Map<string, { minCol: number; maxCol: number; minRow: number; maxRow: number; blockCol: number; blockRow: number; tiles: Phaser.GameObjects.GameObject[] }>();
+    const chunkMap = new Map<string, {
+      minCol: number; maxCol: number; minRow: number; maxRow: number;
+      blockCol: number; blockRow: number;
+      tiles: Phaser.GameObjects.GameObject[];
+    }>();
 
     for (let row = 0; row < this.mapRows; row++) {
       for (let col = 0; col < this.mapCols; col++) {
-        const tile = map[row][col];
-        if (tile === BUILDING) {
-          const bData = this.buildingData[row][col];
-          const tileObjects: Phaser.GameObjects.GameObject[] = [];
+        const tile = this.cityMap[row][col];
 
-          // Sidewalk ground under building (visible through inset gaps)
-          const gx = (col - row) * (this.tileWidth / 2);
-          const gy = (col + row) * (this.tileHeight / 2);
-          this.add.image(gx, gy - CURB_HEIGHT, "sidewalk").setDepth(0.6);
+        if (tile === TileType.BUILDING) {
+          const bData = this.buildingData[row][col];
+          let tileObjects: Phaser.GameObjects.GameObject[] = [];
 
           if (bData) {
-            const tw = this.tileWidth;
-            const th = this.tileHeight;
-
-            // Col-axis inset: compress building toward block center
-            const relCol = (col % COL_PERIOD) - 10; // 0-11 within block
-            const t = relCol / 11;
-            const dc = bData.inset * (1 - 2 * t); // +inset at NW edge, -inset at SE edge
-            const ox = dc * (tw / 2);
-            const oy = dc * (th / 2);
-
-            const bx = (col - row) * (tw / 2) + ox;
-            const by = (col + row) * (th / 2) + oy;
-            const tileDepth = bData.stories * STORY_HEIGHT + bData.heightOffset;
-            const depth = col + row;
-            const v = bData.texture;
-
-            // Scale walls to reach ground when heightOffset stretches them
-            const wallImgHeight = 16 + bData.stories * STORY_HEIGHT;
-            const scaleY = (tileDepth + 16) / wallImgHeight;
-
-            // NW back wall (code "left wall" image: W-to-S edge)
-            const leftImg = this.add.image(bx - tw / 2, by - tileDepth, `wall-left-v${v}-${bData.stories}s`);
-            leftImg.setOrigin(0, 0).setDepth(depth).setTint(bData.color.left).setScale(1, scaleY);
-            tileObjects.push(leftImg);
-
-            // NE back wall (code "right wall" image: E-to-S edge)
-            const rightImg = this.add.image(bx, by - tileDepth, `wall-right-v${v}-${bData.stories}s`);
-            rightImg.setOrigin(0, 0).setDepth(depth).setTint(bData.color.right).setScale(1, scaleY);
-            tileObjects.push(rightImg);
-
-            // Top face
-            const topImg = this.add.image(bx, by - tileDepth, `bldg-top-v${v}`);
-            topImg.setDepth(depth + 0.1).setTint(bData.color.top);
-            tileObjects.push(topImg);
-
-            // Door on the SE wall (N-to-E edge, visible on RIGHT side of building)
-            // SE wall is exposed at colMod 21 (building's east edge)
-            if (row === bData.buildingMaxRow && (col % COL_PERIOD) === 21) {
-              const dw = 28;
-              const dh = STORY_HEIGHT * 0.75;
-              const xoff = 2;
-
-              // SE wall (E-to-S edge): slope -0.5, ground at S vertex (bx, by+16)
-              const x0 = bx + xoff;
-              const y0 = by + th / 2 - xoff * 0.5;
-
-              const doorGfx = this.add.graphics();
-              doorGfx.setDepth(depth + 0.5);
-              doorGfx.fillStyle(0xff0000, 1); // bright red for now
-              doorGfx.fillPoints([
-                new Phaser.Geom.Point(x0, y0),
-                new Phaser.Geom.Point(x0 + dw, y0 - dw * 0.5),
-                new Phaser.Geom.Point(x0 + dw, y0 - dw * 0.5 - dh),
-                new Phaser.Geom.Point(x0, y0 - dh),
-              ], true);
-              tileObjects.push(doorGfx);
-            }
+            tileObjects = renderBuildingTile(this, col, row, bData);
+          } else {
+            // Sidewalk ground for building tiles without data
+            const { x, y } = isoToScreen(col, row);
+            this.add.image(x, y - 6, "sidewalk").setDepth(0.6);
           }
 
+          // Register into chunks
           const relCol = (col % COL_PERIOD) - 10;
           const relRow = (row % ROW_PERIOD) - 10;
           const blockCol = Math.floor(col / COL_PERIOD);
@@ -490,243 +375,16 @@ export class GameScene extends Phaser.Scene {
           chunk.minRow = Math.min(chunk.minRow, row);
           chunk.maxRow = Math.max(chunk.maxRow, row);
           for (const obj of tileObjects) chunk.tiles.push(obj);
-        } else if (tile === STREET) {
-          const x = (col - row) * (this.tileWidth / 2);
-          const y = (col + row) * (this.tileHeight / 2);
-          this.add.image(x, y, "street").setDepth(0);
 
-          const colMod = col % COL_PERIOD;
-          const rowMod = row % ROW_PERIOD;
-          const inStreetCol = colMod < 8;
-          const inStreetRow = rowMod < 8;
-          const isIntersection = inStreetCol && inStreetRow;
+        } else if (tile === TileType.STREET) {
+          renderStreetTile(this, col, row, streetLines);
 
-          if (!isIntersection) {
-            const tw = this.tileWidth;
-            const th = this.tileHeight;
-
-            // Double yellow center lines on streets
-            const isCenter = inStreetCol ? colMod === 4 : rowMod === 4;
-
-            // Skip yellow lines near crosswalks
-            const nearCrosswalk = inStreetCol
-              ? (rowMod >= 7 && rowMod <= 10) || (rowMod >= 37 && rowMod <= 39)
-              : (colMod >= 7 && colMod <= 10) || (colMod >= 21 && colMod <= 23);
-
-            if (isCenter && !nearCrosswalk) {
-              // Exactly half tile size — segments connect at tile boundaries with no overlap
-              const ext = 16;
-              const hext = 8;
-              const gap = 2; // perpendicular offset between lines
-              const hw = 1; // vertical half-width of each line
-              streetLines.fillStyle(0x8b8520, 0.5);
-              if (inStreetCol) {
-                // Two parallel NW-SE parallelograms offset along NE-SW axis
-                for (const s of [-1, 1]) {
-                  const ox = gap * s;
-                  const oy = gap * s / 2;
-                  streetLines.fillPoints([
-                    new Phaser.Geom.Point(x + ext + ox, y - hext + oy - hw),
-                    new Phaser.Geom.Point(x + ext + ox, y - hext + oy + hw),
-                    new Phaser.Geom.Point(x - ext + ox, y + hext + oy + hw),
-                    new Phaser.Geom.Point(x - ext + ox, y + hext + oy - hw),
-                  ], true);
-                }
-              } else {
-                // Two parallel NE-SW parallelograms offset along NW-SE axis
-                for (const s of [-1, 1]) {
-                  const ox = -gap * s;
-                  const oy = gap * s / 2;
-                  streetLines.fillPoints([
-                    new Phaser.Geom.Point(x - ext + ox, y - hext + oy - hw),
-                    new Phaser.Geom.Point(x - ext + ox, y - hext + oy + hw),
-                    new Phaser.Geom.Point(x + ext + ox, y + hext + oy + hw),
-                    new Phaser.Geom.Point(x + ext + ox, y + hext + oy - hw),
-                  ], true);
-                }
-              }
-            }
-
-            // White stop lines — only on the approaching traffic's side of the center line
-            const hw2 = 4;
-            // Col-streets: center line at colMod 4
-            // rowMod 10 (approaching from SE going NW): right lane = colMod 0-3
-            // rowMod 37 (approaching from NW going SE): right lane = colMod 5-7
-            if (inStreetCol && rowMod === 10 && colMod >= 5) {
-              streetLines.fillStyle(0xffffff, 0.4);
-              streetLines.fillPoints([
-                new Phaser.Geom.Point(x - tw / 4 - hw2, y - th / 4 + hw2 * 0.5),
-                new Phaser.Geom.Point(x - tw / 4 + hw2, y - th / 4 - hw2 * 0.5),
-                new Phaser.Geom.Point(x + tw / 4 + hw2, y + th / 4 - hw2 * 0.5),
-                new Phaser.Geom.Point(x + tw / 4 - hw2, y + th / 4 + hw2 * 0.5),
-              ], true);
-            }
-            if (inStreetCol && rowMod === 37 && colMod <= 3) {
-              streetLines.fillStyle(0xffffff, 0.4);
-              streetLines.fillPoints([
-                new Phaser.Geom.Point(x - tw / 4 - hw2, y - th / 4 + hw2 * 0.5),
-                new Phaser.Geom.Point(x - tw / 4 + hw2, y - th / 4 - hw2 * 0.5),
-                new Phaser.Geom.Point(x + tw / 4 + hw2, y + th / 4 - hw2 * 0.5),
-                new Phaser.Geom.Point(x + tw / 4 - hw2, y + th / 4 + hw2 * 0.5),
-              ], true);
-            }
-            // Row-streets: center line at rowMod 4
-            // colMod 10 (approaching from NE going SW): right lane = rowMod 5-7
-            // colMod 21 (approaching from SW going NE): right lane = rowMod 0-3
-            if (inStreetRow && colMod === 10 && rowMod <= 3) {
-              streetLines.fillStyle(0xffffff, 0.4);
-              streetLines.fillPoints([
-                new Phaser.Geom.Point(x + tw / 4 - hw2, y - th / 4 - hw2 * 0.5),
-                new Phaser.Geom.Point(x + tw / 4 + hw2, y - th / 4 + hw2 * 0.5),
-                new Phaser.Geom.Point(x - tw / 4 + hw2, y + th / 4 + hw2 * 0.5),
-                new Phaser.Geom.Point(x - tw / 4 - hw2, y + th / 4 - hw2 * 0.5),
-              ], true);
-            }
-            if (inStreetRow && colMod === 21 && rowMod >= 5) {
-              streetLines.fillStyle(0xffffff, 0.4);
-              streetLines.fillPoints([
-                new Phaser.Geom.Point(x + tw / 4 - hw2, y - th / 4 - hw2 * 0.5),
-                new Phaser.Geom.Point(x + tw / 4 + hw2, y - th / 4 + hw2 * 0.5),
-                new Phaser.Geom.Point(x - tw / 4 + hw2, y + th / 4 + hw2 * 0.5),
-                new Phaser.Geom.Point(x - tw / 4 - hw2, y + th / 4 - hw2 * 0.5),
-              ], true);
-            }
-
-            // Crosswalks: white bars on street tiles adjacent to sidewalks
-            // Col-street crosswalks at rowMod 8-9 and 38-39 (next to sidewalks)
-            const hw = 3; // bar half-width
-            // Col-street crosswalks at rowMod 8-9 and 38-39
-            if (inStreetCol && (rowMod === 8 || rowMod === 9 || rowMod === 38 || rowMod === 39)) {
-              streetLines.fillStyle(0xffffff, 0.35);
-              streetLines.fillPoints([
-                new Phaser.Geom.Point(x + tw / 4 - hw, y - th / 4 - hw * 0.5),
-                new Phaser.Geom.Point(x + tw / 4 + hw, y - th / 4 + hw * 0.5),
-                new Phaser.Geom.Point(x - tw / 4 + hw, y + th / 4 + hw * 0.5),
-                new Phaser.Geom.Point(x - tw / 4 - hw, y + th / 4 - hw * 0.5),
-              ], true);
-            }
-            // Row-street crosswalks at colMod 8-9 and 22-23
-            if (inStreetRow && (colMod === 8 || colMod === 9 || colMod === 22 || colMod === 23)) {
-              streetLines.fillStyle(0xffffff, 0.35);
-              streetLines.fillPoints([
-                new Phaser.Geom.Point(x - tw / 4 + hw, y - th / 4 - hw * 0.5),
-                new Phaser.Geom.Point(x - tw / 4 - hw, y - th / 4 + hw * 0.5),
-                new Phaser.Geom.Point(x + tw / 4 - hw, y + th / 4 + hw * 0.5),
-                new Phaser.Geom.Point(x + tw / 4 + hw, y + th / 4 - hw * 0.5),
-              ], true);
-            }
-          }
-        } else if (tile === SIDEWALK) {
-          const tw = this.tileWidth;
-          const th = this.tileHeight;
-          const sx = (col - row) * (tw / 2);
-          const sy = (col + row) * (th / 2);
-
-          // Textured top face (raised by curb height)
-          this.add.image(sx, sy - CURB_HEIGHT, "sidewalk").setDepth(0.6);
-
-          // Curb walls (left and right faces)
-          const colors = TILE_COLORS[SIDEWALK];
-          sidewalkGfx.fillStyle(colors.left, 1);
-          sidewalkGfx.fillPoints([
-            new Phaser.Geom.Point(sx - tw / 2, sy - CURB_HEIGHT),
-            new Phaser.Geom.Point(sx, sy + th / 2 - CURB_HEIGHT),
-            new Phaser.Geom.Point(sx, sy + th / 2),
-            new Phaser.Geom.Point(sx - tw / 2, sy),
-          ], true);
-          sidewalkGfx.fillStyle(colors.right, 1);
-          sidewalkGfx.fillPoints([
-            new Phaser.Geom.Point(sx + tw / 2, sy - CURB_HEIGHT),
-            new Phaser.Geom.Point(sx, sy + th / 2 - CURB_HEIGHT),
-            new Phaser.Geom.Point(sx, sy + th / 2),
-            new Phaser.Geom.Point(sx + tw / 2, sy),
-          ], true);
-          sidewalkLines.lineStyle(1, 0x2e2e3e, 0.5);
-          if (col % 2 === 0) {
-            // NW edge (col boundary, runs NW-SE)
-            sidewalkLines.lineBetween(sx, sy - th / 2 - CURB_HEIGHT, sx - tw / 2, sy - CURB_HEIGHT);
-          }
-          if (row % 2 === 0) {
-            // NE edge (row boundary, runs NE-SW)
-            sidewalkLines.lineBetween(sx, sy - th / 2 - CURB_HEIGHT, sx + tw / 2, sy - CURB_HEIGHT);
-          }
+        } else if (tile === TileType.SIDEWALK) {
+          renderSidewalkTile(this, col, row, sidewalkGfx, sidewalkLines);
         }
       }
     }
 
     this.buildingChunks = Array.from(chunkMap.values());
-  }
-
-  private drawTile(graphics: Phaser.GameObjects.Graphics, col: number, row: number, tile: number) {
-    const tw = this.tileWidth;
-    const th = this.tileHeight;
-    const x = (col - row) * (tw / 2);
-    const y = (col + row) * (th / 2);
-
-    const bData = tile === BUILDING ? this.buildingData[row][col] : null;
-    const colors = bData ? bData.color : TILE_COLORS[tile];
-    const tileDepth = bData ? bData.stories * STORY_HEIGHT : (tile === SIDEWALK ? CURB_HEIGHT : 0);
-
-    graphics.fillStyle(colors.top, 1);
-    graphics.fillPoints(
-      [
-        new Phaser.Geom.Point(x, y - th / 2 - tileDepth),
-        new Phaser.Geom.Point(x + tw / 2, y - tileDepth),
-        new Phaser.Geom.Point(x, y + th / 2 - tileDepth),
-        new Phaser.Geom.Point(x - tw / 2, y - tileDepth),
-      ],
-      true
-    );
-
-    if (tileDepth > 0) {
-      graphics.fillStyle(colors.left, 1);
-      graphics.fillPoints(
-        [
-          new Phaser.Geom.Point(x - tw / 2, y - tileDepth),
-          new Phaser.Geom.Point(x, y + th / 2 - tileDepth),
-          new Phaser.Geom.Point(x, y + th / 2),
-          new Phaser.Geom.Point(x - tw / 2, y),
-        ],
-        true
-      );
-
-      graphics.fillStyle(colors.right, 1);
-      graphics.fillPoints(
-        [
-          new Phaser.Geom.Point(x + tw / 2, y - tileDepth),
-          new Phaser.Geom.Point(x, y + th / 2 - tileDepth),
-          new Phaser.Geom.Point(x, y + th / 2),
-          new Phaser.Geom.Point(x + tw / 2, y),
-        ],
-        true
-      );
-
-      if (tile === BUILDING) {
-        graphics.lineStyle(1, 0x252540, 0.3);
-        graphics.strokePoints(
-          [
-            new Phaser.Geom.Point(x, y - th / 2 - tileDepth),
-            new Phaser.Geom.Point(x + tw / 2, y - tileDepth),
-            new Phaser.Geom.Point(x, y + th / 2 - tileDepth),
-            new Phaser.Geom.Point(x - tw / 2, y - tileDepth),
-            new Phaser.Geom.Point(x, y - th / 2 - tileDepth),
-          ],
-          true
-        );
-      }
-    }
-
-    if (tile === STREET) {
-      const inStreetCol = (col % COL_PERIOD) < 8;
-      const inStreetRow = (row % ROW_PERIOD) < 8;
-      const isCenter = inStreetCol
-        ? (col % COL_PERIOD === 3 || col % COL_PERIOD === 4)
-        : (row % ROW_PERIOD === 3 || row % ROW_PERIOD === 4);
-
-      if (isCenter && !inStreetCol !== !inStreetRow) {
-        graphics.lineStyle(1, STREET_LINE, 0.6);
-        graphics.lineBetween(x - tw / 4, y, x + tw / 4, y);
-      }
-    }
   }
 }

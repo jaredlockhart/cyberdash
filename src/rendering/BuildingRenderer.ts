@@ -1,7 +1,6 @@
 import Phaser from "phaser";
 import { TILE_W, TILE_H, isoToScreen } from "../iso/IsoGeometry";
 import { STORY_HEIGHT } from "../iso/CityLayout";
-import { WallFaceGeometry, wallFeatureRect } from "../iso/WallFace";
 import { Building } from "./BuildingTypes";
 
 interface Corner { x: number; y: number }
@@ -106,27 +105,17 @@ export function renderBuilding(
     }
   }
 
-  // Door on SE wall (left = near S vertex, right = near E vertex)
-  const seFace: WallFaceGeometry = {
-    baseX: S.x,
-    baseY: S.y,
-    dx: 1,
-    slope: -0.5,
-    wallHeight,
-  };
+  // Door image on SE wall (left = near S vertex, right = near E vertex)
   const doorWidth = 48;
   const seWallLen = E.x - S.x;
   const doorMargin = building.doorInset;
   const doorAlong = building.doorSide === "left" ? doorMargin : seWallLen - doorWidth - doorMargin;
-  const doorPoints = wallFeatureRect(seFace, doorAlong, 0, doorWidth, STORY_HEIGHT * 0.75);
-  const doorGfx = scene.add.graphics();
-  doorGfx.setDepth(depth + 0.5);
-  doorGfx.fillStyle(0xff0000, 1);
-  doorGfx.fillPoints(
-    doorPoints.map((p) => new Phaser.Geom.Point(p.x, p.y)),
-    true,
-  );
-  objects.push(doorGfx);
+  const doorCenterAlong = doorAlong + doorWidth / 2;
+  const doorX = S.x + doorCenterAlong;
+  const doorY = S.y - doorCenterAlong * 0.5 + TILE_H / 2;
+  const doorImg = scene.add.image(doorX, doorY, `door-${building.doorTexture}`);
+  doorImg.setOrigin(0.5, 1).setDepth(depth + 0.5);
+  objects.push(doorImg);
 
   return objects;
 }

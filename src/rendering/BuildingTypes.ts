@@ -18,6 +18,7 @@ export interface Building {
   heightOffset: number; // random pixel offset added to base story height
   doorSide: "left" | "right";
   doorInset: number;   // pixels inset from wall edge
+  doorTexture: number; // 0-2, door image variant
 }
 
 // Dark cyberpunk color palette — base hues with consistent lighting

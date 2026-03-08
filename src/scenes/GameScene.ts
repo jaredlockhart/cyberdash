@@ -18,11 +18,12 @@ const SIDEWALK = 2;
 // Isometric tile colors: top face, left face, right face
 const TILE_COLORS: Record<number, { top: number; left: number; right: number }> = {
   [STREET]: { top: 0x2a2a2a, left: 0x222222, right: 0x1a1a1a },
-  [SIDEWALK]: { top: 0x3a3a4a, left: 0x30303e, right: 0x282835 },
+  [SIDEWALK]: { top: 0x262628, left: 0x202022, right: 0x1a1a1c },
 };
 
 const STREET_LINE = 0x3a3a3a;
 const STORY_HEIGHT = 128;
+const CURB_HEIGHT = 6;
 const COL_PERIOD = 24;
 const ROW_PERIOD = 40;
 
@@ -360,6 +361,10 @@ export class GameScene extends Phaser.Scene {
   private drawCityMap(map: number[][]) {
     const ground = this.add.graphics();
     ground.setDepth(0);
+    const sidewalkGfx = this.add.graphics();
+    sidewalkGfx.setDepth(0.6);
+    const sidewalkLines = this.add.graphics();
+    sidewalkLines.setDepth(0.7);
     const streetLines = this.add.graphics();
     streetLines.setDepth(0.5);
 
@@ -495,8 +500,40 @@ export class GameScene extends Phaser.Scene {
               ], true);
             }
           }
-        } else {
-          this.drawTile(ground, col, row, tile);
+        } else if (tile === SIDEWALK) {
+          const tw = this.tileWidth;
+          const th = this.tileHeight;
+          const sx = (col - row) * (tw / 2);
+          const sy = (col + row) * (th / 2);
+
+          // Textured top face (raised by curb height)
+          this.add.image(sx, sy - CURB_HEIGHT, "sidewalk").setDepth(0.6);
+
+          // Curb walls (left and right faces)
+          const colors = TILE_COLORS[SIDEWALK];
+          sidewalkGfx.fillStyle(colors.left, 1);
+          sidewalkGfx.fillPoints([
+            new Phaser.Geom.Point(sx - tw / 2, sy - CURB_HEIGHT),
+            new Phaser.Geom.Point(sx, sy + th / 2 - CURB_HEIGHT),
+            new Phaser.Geom.Point(sx, sy + th / 2),
+            new Phaser.Geom.Point(sx - tw / 2, sy),
+          ], true);
+          sidewalkGfx.fillStyle(colors.right, 1);
+          sidewalkGfx.fillPoints([
+            new Phaser.Geom.Point(sx + tw / 2, sy - CURB_HEIGHT),
+            new Phaser.Geom.Point(sx, sy + th / 2 - CURB_HEIGHT),
+            new Phaser.Geom.Point(sx, sy + th / 2),
+            new Phaser.Geom.Point(sx + tw / 2, sy),
+          ], true);
+          sidewalkLines.lineStyle(1, 0x2e2e3e, 0.5);
+          if (col % 2 === 0) {
+            // NW edge (col boundary, runs NW-SE)
+            sidewalkLines.lineBetween(sx, sy - th / 2 - CURB_HEIGHT, sx - tw / 2, sy - CURB_HEIGHT);
+          }
+          if (row % 2 === 0) {
+            // NE edge (row boundary, runs NE-SW)
+            sidewalkLines.lineBetween(sx, sy - th / 2 - CURB_HEIGHT, sx + tw / 2, sy - CURB_HEIGHT);
+          }
         }
       }
     }
@@ -512,7 +549,7 @@ export class GameScene extends Phaser.Scene {
 
     const bData = tile === BUILDING ? this.buildingData[row][col] : null;
     const colors = bData ? bData.color : TILE_COLORS[tile];
-    const tileDepth = bData ? bData.stories * STORY_HEIGHT : 0;
+    const tileDepth = bData ? bData.stories * STORY_HEIGHT : (tile === SIDEWALK ? CURB_HEIGHT : 0);
 
     graphics.fillStyle(colors.top, 1);
     graphics.fillPoints(
@@ -548,17 +585,19 @@ export class GameScene extends Phaser.Scene {
         true
       );
 
-      graphics.lineStyle(1, 0x252540, 0.3);
-      graphics.strokePoints(
-        [
-          new Phaser.Geom.Point(x, y - th / 2 - tileDepth),
-          new Phaser.Geom.Point(x + tw / 2, y - tileDepth),
-          new Phaser.Geom.Point(x, y + th / 2 - tileDepth),
-          new Phaser.Geom.Point(x - tw / 2, y - tileDepth),
-          new Phaser.Geom.Point(x, y - th / 2 - tileDepth),
-        ],
-        true
-      );
+      if (tile === BUILDING) {
+        graphics.lineStyle(1, 0x252540, 0.3);
+        graphics.strokePoints(
+          [
+            new Phaser.Geom.Point(x, y - th / 2 - tileDepth),
+            new Phaser.Geom.Point(x + tw / 2, y - tileDepth),
+            new Phaser.Geom.Point(x, y + th / 2 - tileDepth),
+            new Phaser.Geom.Point(x - tw / 2, y - tileDepth),
+            new Phaser.Geom.Point(x, y - th / 2 - tileDepth),
+          ],
+          true
+        );
+      }
     }
 
     if (tile === STREET) {

@@ -33,6 +33,10 @@ export class GameScene extends Phaser.Scene {
   private shiftKey!: Phaser.Input.Keyboard.Key;
   private facing: Direction = "south";
   private cityMap!: number[][];
+  private buildingChunks: {
+    minCol: number; maxCol: number; minRow: number; maxRow: number;
+    tiles: Phaser.GameObjects.Graphics[];
+  }[] = [];
 
   // Walk tuning
   private walkSpeed = 160;
@@ -175,7 +179,26 @@ export class GameScene extends Phaser.Scene {
     // Depth sort: use sprite bottom (feet) so player stays in front of building walls
     // until their feet actually cross behind the building edge
     const feetY = this.player.y + this.player.displayHeight / 2;
-    this.player.setDepth(feetY / (this.tileHeight / 2));
+    const playerDepth = feetY / (this.tileHeight / 2);
+    this.player.setDepth(playerDepth);
+
+    // Hide building chunks when player is behind them (use feet position for iso coords)
+    const pCol = (this.player.x / (this.tileWidth / 2) + feetY / (this.tileHeight / 2)) / 2;
+    const pRow = (feetY / (this.tileHeight / 2) - this.player.x / (this.tileWidth / 2)) / 2;
+    const margin = 6;
+
+    for (const chunk of this.buildingChunks) {
+      const nearestCol = Math.max(chunk.minCol, Math.min(chunk.maxCol, pCol));
+      const nearestRow = Math.max(chunk.minRow, Math.min(chunk.maxRow, pRow));
+      const behind = pCol + pRow < nearestCol + nearestRow;
+      const withinCol = pCol >= chunk.minCol - margin && pCol <= chunk.maxCol;
+      const withinRow = pRow >= chunk.minRow - margin && pRow <= chunk.maxRow;
+      const hide = behind && withinCol && withinRow;
+
+      for (const g of chunk.tiles) {
+        g.setVisible(!hide);
+      }
+    }
   }
 
   private getDirection(dx: number, dy: number): Direction {
@@ -223,32 +246,39 @@ export class GameScene extends Phaser.Scene {
     const ground = this.add.graphics();
     ground.setDepth(0);
 
-    // Group building tiles by iso depth (col + row) for proper depth sorting
-    const buildingsByDepth = new Map<number, { col: number; row: number }[]>();
+    // Group building tiles into small chunks for clean rectangular occlusion
+    const chunkSize = 6;
+    const chunkMap = new Map<string, { minCol: number; maxCol: number; minRow: number; maxRow: number; tiles: Phaser.GameObjects.Graphics[] }>();
 
     for (let row = 0; row < this.mapRows; row++) {
       for (let col = 0; col < this.mapCols; col++) {
         const tile = map[row][col];
         if (tile === BUILDING) {
-          const depth = col + row;
-          if (!buildingsByDepth.has(depth)) {
-            buildingsByDepth.set(depth, []);
+          const g = this.add.graphics();
+          g.setDepth(col + row);
+          this.drawTile(g, col, row, BUILDING);
+
+          const relCol = (col % COL_PERIOD) - 10;
+          const relRow = (row % ROW_PERIOD) - 10;
+          const blockCol = Math.floor(col / COL_PERIOD);
+          const blockRow = Math.floor(row / ROW_PERIOD);
+          const ck = `${blockCol},${blockRow},${Math.floor(relCol / chunkSize)},${Math.floor(relRow / chunkSize)}`;
+          if (!chunkMap.has(ck)) {
+            chunkMap.set(ck, { minCol: col, maxCol: col, minRow: row, maxRow: row, tiles: [] });
           }
-          buildingsByDepth.get(depth)!.push({ col, row });
+          const chunk = chunkMap.get(ck)!;
+          chunk.minCol = Math.min(chunk.minCol, col);
+          chunk.maxCol = Math.max(chunk.maxCol, col);
+          chunk.minRow = Math.min(chunk.minRow, row);
+          chunk.maxRow = Math.max(chunk.maxRow, row);
+          chunk.tiles.push(g);
         } else {
           this.drawTile(ground, col, row, tile);
         }
       }
     }
 
-    // Each iso-depth row of buildings gets its own Graphics for depth interleaving with the player
-    for (const [depth, tiles] of buildingsByDepth) {
-      const g = this.add.graphics();
-      g.setDepth(depth);
-      for (const { col, row } of tiles) {
-        this.drawTile(g, col, row, BUILDING);
-      }
-    }
+    this.buildingChunks = Array.from(chunkMap.values());
   }
 
   private drawTile(graphics: Phaser.GameObjects.Graphics, col: number, row: number, tile: number) {

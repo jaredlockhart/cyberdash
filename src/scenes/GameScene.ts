@@ -22,14 +22,17 @@ const TILE_COLORS: Record<number, { top: number; left: number; right: number }> 
   [SIDEWALK]: { top: 0x3a3a4a, left: 0x30303e, right: 0x282835 },
 };
 
-// Street line color
 const STREET_LINE = 0x3a3a3a;
+const BUILDING_HEIGHT = 192;
+const COL_PERIOD = 24;
+const ROW_PERIOD = 40;
 
 export class GameScene extends Phaser.Scene {
   private player!: Phaser.GameObjects.Sprite;
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
   private shiftKey!: Phaser.Input.Keyboard.Key;
   private facing: Direction = "south";
+  private cityMap!: number[][];
 
   // Walk tuning
   private walkSpeed = 160;
@@ -45,17 +48,31 @@ export class GameScene extends Phaser.Scene {
   private readonly tileWidth = 64;
   private readonly tileHeight = 32;
   private readonly mapCols = 72;
-  private readonly mapRows = 72;
+  private readonly mapRows = 88;
 
   constructor() {
     super({ key: "GameScene" });
   }
 
   create() {
-    const cityMap = this.generateCityMap();
-    this.drawCityMap(cityMap);
+    this.cityMap = this.generateCityMap();
+    this.drawCityMap(this.cityMap);
 
-    // Spawn player on a street tile near center
+    // Building collision bodies
+    const walls = this.physics.add.staticGroup();
+    for (let row = 0; row < this.mapRows; row++) {
+      for (let col = 0; col < this.mapCols; col++) {
+        if (this.cityMap[row][col] === BUILDING) {
+          const x = (col - row) * (this.tileWidth / 2);
+          const y = (col + row) * (this.tileHeight / 2);
+          const zone = this.add.zone(x, y, this.tileWidth * 0.45, this.tileHeight * 0.45);
+          this.physics.add.existing(zone, true);
+          walls.add(zone);
+        }
+      }
+    }
+
+    // Spawn player on a street tile
     const spawnCol = 7;
     const spawnRow = 7;
     const spawnX = (spawnCol - spawnRow) * (this.tileWidth / 2);
@@ -63,14 +80,19 @@ export class GameScene extends Phaser.Scene {
 
     this.player = this.add.sprite(spawnX, spawnY, "player-south");
     this.player.setScale(2);
-    this.player.setDepth(10);
     this.physics.add.existing(this.player);
 
-    // Camera follows player
+    const playerBody = this.player.body as Phaser.Physics.Arcade.Body;
+    playerBody.setSize(16, 8);
+    playerBody.setOffset(16, 36);
+
+    this.physics.add.collider(this.player, walls);
+
+    // Camera
     this.cameras.main.startFollow(this.player, true, 0.08, 0.08);
     this.cameras.main.setDeadzone(40, 40);
 
-    // HUD text (fixed to camera)
+    // HUD
     const dpr = window.devicePixelRatio || 1;
 
     this.add
@@ -82,7 +104,8 @@ export class GameScene extends Phaser.Scene {
       })
       .setOrigin(0.5)
       .setResolution(dpr)
-      .setScrollFactor(0);
+      .setScrollFactor(0)
+      .setDepth(1000);
 
     this.add
       .text(480, 52, "Arrow keys to move \u2022 Hold SHIFT to run", {
@@ -92,9 +115,9 @@ export class GameScene extends Phaser.Scene {
       })
       .setOrigin(0.5)
       .setResolution(dpr)
-      .setScrollFactor(0);
+      .setScrollFactor(0)
+      .setDepth(1000);
 
-    // Input
     this.cursors = this.input.keyboard!.createCursorKeys();
     this.shiftKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.SHIFT);
   }
@@ -122,7 +145,6 @@ export class GameScene extends Phaser.Scene {
     if (inputX !== 0 || inputY !== 0) {
       this.facing = this.getDirection(inputX, inputY);
 
-      // For diagonals, use iso-aligned 2:1 slope instead of 45°
       let moveX = inputX;
       let moveY = inputY;
       if (inputX !== 0 && inputY !== 0) {
@@ -149,6 +171,11 @@ export class GameScene extends Phaser.Scene {
         this.player.setTexture(`player-${this.facing}`);
       }
     }
+
+    // Depth sort: use sprite bottom (feet) so player stays in front of building walls
+    // until their feet actually cross behind the building edge
+    const feetY = this.player.y + this.player.displayHeight / 2;
+    this.player.setDepth(feetY / (this.tileHeight / 2));
   }
 
   private getDirection(dx: number, dy: number): Direction {
@@ -169,28 +196,22 @@ export class GameScene extends Phaser.Scene {
     for (let row = 0; row < this.mapRows; row++) {
       map[row] = [];
       for (let col = 0; col < this.mapCols; col++) {
-        // Street pattern: 4-wide streets every 10 tiles
-        const inStreetCol = (col % 24) < 8;
-        const inStreetRow = (row % 24) < 8;
+        const colMod = col % COL_PERIOD;
+        const rowMod = row % ROW_PERIOD;
+        const inStreetCol = colMod < 8;
+        const inStreetRow = rowMod < 8;
 
         if (inStreetCol || inStreetRow) {
-          // Sidewalk borders the street (1 tile around streets)
-          const nextToBuilding =
-            (!inStreetCol && this.isBuildingAt(col, row - 1)) ||
-            (!inStreetCol && this.isBuildingAt(col, row + 1)) ||
-            (!inStreetRow && this.isBuildingAt(col - 1, row)) ||
-            (!inStreetRow && this.isBuildingAt(col + 1, row));
+          map[row][col] = STREET;
+        } else {
+          const colEdge = colMod <= 9 || colMod >= 22;
+          const rowEdge = rowMod <= 9 || rowMod >= 38;
 
-          if (inStreetCol && inStreetRow) {
-            // Intersection - always street
-            map[row][col] = STREET;
-          } else if (nextToBuilding) {
+          if (colEdge || rowEdge) {
             map[row][col] = SIDEWALK;
           } else {
-            map[row][col] = STREET;
+            map[row][col] = BUILDING;
           }
-        } else {
-          map[row][col] = BUILDING;
         }
       }
     }
@@ -198,96 +219,103 @@ export class GameScene extends Phaser.Scene {
     return map;
   }
 
-  private isBuildingAt(col: number, row: number): boolean {
-    if (col < 0 || row < 0 || col >= this.mapCols || row >= this.mapRows) return false;
-    const inStreetCol = (col % 24) < 8;
-    const inStreetRow = (row % 24) < 8;
-    return !inStreetCol && !inStreetRow;
-  }
-
   private drawCityMap(map: number[][]) {
-    const graphics = this.add.graphics();
-    const tw = this.tileWidth;
-    const th = this.tileHeight;
+    const ground = this.add.graphics();
+    ground.setDepth(0);
+
+    // Group building tiles by iso depth (col + row) for proper depth sorting
+    const buildingsByDepth = new Map<number, { col: number; row: number }[]>();
 
     for (let row = 0; row < this.mapRows; row++) {
       for (let col = 0; col < this.mapCols; col++) {
         const tile = map[row][col];
-        const colors = TILE_COLORS[tile];
-
-        // Isometric position
-        const x = (col - row) * (tw / 2);
-        const y = (col + row) * (th / 2);
-
-        const tileDepth = tile === BUILDING ? 8 : 0;
-
-        // Top face (diamond)
-        graphics.fillStyle(colors.top, 1);
-        graphics.fillPoints(
-          [
-            new Phaser.Geom.Point(x, y - th / 2 - tileDepth),
-            new Phaser.Geom.Point(x + tw / 2, y - tileDepth),
-            new Phaser.Geom.Point(x, y + th / 2 - tileDepth),
-            new Phaser.Geom.Point(x - tw / 2, y - tileDepth),
-          ],
-          true
-        );
-
-        if (tileDepth > 0) {
-          // Left face
-          graphics.fillStyle(colors.left, 1);
-          graphics.fillPoints(
-            [
-              new Phaser.Geom.Point(x - tw / 2, y - tileDepth),
-              new Phaser.Geom.Point(x, y + th / 2 - tileDepth),
-              new Phaser.Geom.Point(x, y + th / 2),
-              new Phaser.Geom.Point(x - tw / 2, y),
-            ],
-            true
-          );
-
-          // Right face
-          graphics.fillStyle(colors.right, 1);
-          graphics.fillPoints(
-            [
-              new Phaser.Geom.Point(x + tw / 2, y - tileDepth),
-              new Phaser.Geom.Point(x, y + th / 2 - tileDepth),
-              new Phaser.Geom.Point(x, y + th / 2),
-              new Phaser.Geom.Point(x + tw / 2, y),
-            ],
-            true
-          );
-        }
-
-        // Street center dashes
-        if (tile === STREET) {
-          const inStreetCol = (col % 24) < 8;
-          const inStreetRow = (row % 24) < 8;
-          const isCenter = inStreetCol ? (col % 24 === 3 || col % 24 === 4) : (row % 24 === 3 || row % 24 === 4);
-
-          if (isCenter && !inStreetCol !== !inStreetRow) {
-            graphics.lineStyle(1, STREET_LINE, 0.6);
-            graphics.lineBetween(
-              x - tw / 4, y - tileDepth,
-              x + tw / 4, y - tileDepth
-            );
-          }
-        }
-
-        // Subtle edge on buildings
         if (tile === BUILDING) {
-          graphics.lineStyle(1, 0x252540, 0.3);
-          graphics.strokePoints(
-            [
-              new Phaser.Geom.Point(x, y - th / 2 - tileDepth),
-              new Phaser.Geom.Point(x + tw / 2, y - tileDepth),
-              new Phaser.Geom.Point(x, y + th / 2 - tileDepth),
-              new Phaser.Geom.Point(x - tw / 2, y - tileDepth),
-              new Phaser.Geom.Point(x, y - th / 2 - tileDepth),
-            ],
-            true
-          );
+          const depth = col + row;
+          if (!buildingsByDepth.has(depth)) {
+            buildingsByDepth.set(depth, []);
+          }
+          buildingsByDepth.get(depth)!.push({ col, row });
+        } else {
+          this.drawTile(ground, col, row, tile);
         }
+      }
+    }
+
+    // Each iso-depth row of buildings gets its own Graphics for depth interleaving with the player
+    for (const [depth, tiles] of buildingsByDepth) {
+      const g = this.add.graphics();
+      g.setDepth(depth);
+      for (const { col, row } of tiles) {
+        this.drawTile(g, col, row, BUILDING);
+      }
+    }
+  }
+
+  private drawTile(graphics: Phaser.GameObjects.Graphics, col: number, row: number, tile: number) {
+    const tw = this.tileWidth;
+    const th = this.tileHeight;
+    const colors = TILE_COLORS[tile];
+    const x = (col - row) * (tw / 2);
+    const y = (col + row) * (th / 2);
+    const tileDepth = tile === BUILDING ? BUILDING_HEIGHT : 0;
+
+    graphics.fillStyle(colors.top, 1);
+    graphics.fillPoints(
+      [
+        new Phaser.Geom.Point(x, y - th / 2 - tileDepth),
+        new Phaser.Geom.Point(x + tw / 2, y - tileDepth),
+        new Phaser.Geom.Point(x, y + th / 2 - tileDepth),
+        new Phaser.Geom.Point(x - tw / 2, y - tileDepth),
+      ],
+      true
+    );
+
+    if (tileDepth > 0) {
+      graphics.fillStyle(colors.left, 1);
+      graphics.fillPoints(
+        [
+          new Phaser.Geom.Point(x - tw / 2, y - tileDepth),
+          new Phaser.Geom.Point(x, y + th / 2 - tileDepth),
+          new Phaser.Geom.Point(x, y + th / 2),
+          new Phaser.Geom.Point(x - tw / 2, y),
+        ],
+        true
+      );
+
+      graphics.fillStyle(colors.right, 1);
+      graphics.fillPoints(
+        [
+          new Phaser.Geom.Point(x + tw / 2, y - tileDepth),
+          new Phaser.Geom.Point(x, y + th / 2 - tileDepth),
+          new Phaser.Geom.Point(x, y + th / 2),
+          new Phaser.Geom.Point(x + tw / 2, y),
+        ],
+        true
+      );
+
+      graphics.lineStyle(1, 0x252540, 0.3);
+      graphics.strokePoints(
+        [
+          new Phaser.Geom.Point(x, y - th / 2 - tileDepth),
+          new Phaser.Geom.Point(x + tw / 2, y - tileDepth),
+          new Phaser.Geom.Point(x, y + th / 2 - tileDepth),
+          new Phaser.Geom.Point(x - tw / 2, y - tileDepth),
+          new Phaser.Geom.Point(x, y - th / 2 - tileDepth),
+        ],
+        true
+      );
+    }
+
+    if (tile === STREET) {
+      const inStreetCol = (col % COL_PERIOD) < 8;
+      const inStreetRow = (row % ROW_PERIOD) < 8;
+      const isCenter = inStreetCol
+        ? (col % COL_PERIOD === 3 || col % COL_PERIOD === 4)
+        : (row % ROW_PERIOD === 3 || row % ROW_PERIOD === 4);
+
+      if (isCenter && !inStreetCol !== !inStreetRow) {
+        graphics.lineStyle(1, STREET_LINE, 0.6);
+        graphics.lineBetween(x - tw / 4, y, x + tw / 4, y);
       }
     }
   }

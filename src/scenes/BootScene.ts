@@ -23,16 +23,26 @@ export class BootScene extends Phaser.Scene {
         frameWidth: 48,
         frameHeight: 48,
       });
+      this.load.spritesheet(`run-${dir}`, `assets/sprites/player/run-${dir}.png`, {
+        frameWidth: 48,
+        frameHeight: 48,
+      });
     }
   }
 
   create() {
-    // Create walk animations for each direction
     for (const dir of DIRECTIONS) {
       this.anims.create({
         key: `walk-${dir}`,
         frames: this.anims.generateFrameNumbers(`walk-${dir}`, { start: 0, end: 5 }),
         frameRate: 10,
+        repeat: -1,
+      });
+
+      this.anims.create({
+        key: `run-${dir}`,
+        frames: this.anims.generateFrameNumbers(`run-${dir}`, { start: 0, end: 7 }),
+        frameRate: 14,
         repeat: -1,
       });
     }

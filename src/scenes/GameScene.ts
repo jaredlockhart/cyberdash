@@ -13,8 +13,18 @@ type Direction =
 export class GameScene extends Phaser.Scene {
   private player!: Phaser.GameObjects.Sprite;
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
+  private shiftKey!: Phaser.Input.Keyboard.Key;
   private facing: Direction = "south";
-  private speed = 200;
+
+  // Walk tuning
+  private walkSpeed = 160;
+  private walkAccel = 1400;
+  private walkDrag = 1600;
+
+  // Run tuning (shift held)
+  private runSpeed = 300;
+  private runAccel = 2400;
+  private runDrag = 2000;
 
   constructor() {
     super({ key: "GameScene" });
@@ -26,7 +36,7 @@ export class GameScene extends Phaser.Scene {
 
     // Player sprite
     this.player = this.add.sprite(480, 270, "player-south");
-    this.player.setScale(2); // Scale up 48px sprite for visibility
+    this.player.setScale(2);
     this.physics.add.existing(this.player);
 
     // Title text (high resolution so it stays crisp when canvas scales)
@@ -43,7 +53,7 @@ export class GameScene extends Phaser.Scene {
       .setResolution(dpr);
 
     this.add
-      .text(480, 52, "Arrow keys to move", {
+      .text(480, 52, "Arrow keys to move \u2022 Hold SHIFT to run", {
         fontFamily: "Arial, Helvetica, sans-serif",
         fontSize: "10px",
         color: "#666666",
@@ -53,11 +63,20 @@ export class GameScene extends Phaser.Scene {
 
     // Input
     this.cursors = this.input.keyboard!.createCursorKeys();
+    this.shiftKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.SHIFT);
   }
 
   update() {
     const body = this.player.body as Phaser.Physics.Arcade.Body;
-    body.setVelocity(0);
+    const running = this.shiftKey.isDown;
+
+    // Apply movement tuning based on walk/run
+    const maxSpeed = running ? this.runSpeed : this.walkSpeed;
+    const accel = running ? this.runAccel : this.walkAccel;
+    const drag = running ? this.runDrag : this.walkDrag;
+
+    body.setMaxSpeed(maxSpeed);
+    body.setDrag(drag, drag);
 
     let dx = 0;
     let dy = 0;
@@ -71,19 +90,29 @@ export class GameScene extends Phaser.Scene {
     if (dx !== 0 || dy !== 0) {
       this.facing = this.getDirection(dx, dy);
 
-      // Play walk animation
-      const animKey = `walk-${this.facing}`;
+      // Normalize diagonal acceleration
+      const len = Math.sqrt(dx * dx + dy * dy);
+      body.setAcceleration(
+        (dx / len) * accel,
+        (dy / len) * accel
+      );
+
+      // Play walk or run animation
+      const prefix = running ? "run" : "walk";
+      const animKey = `${prefix}-${this.facing}`;
       if (this.player.anims.currentAnim?.key !== animKey) {
+        this.player.stop();
         this.player.play(animKey);
       }
-
-      // Normalize diagonal speed
-      const len = Math.sqrt(dx * dx + dy * dy);
-      body.setVelocity((dx / len) * this.speed, (dy / len) * this.speed);
     } else {
-      // Stop animation and show idle frame
-      this.player.stop();
-      this.player.setTexture(`player-${this.facing}`);
+      // Let drag slow us down naturally
+      body.setAcceleration(0, 0);
+
+      // Switch to idle once nearly stopped
+      if (body.speed < 20) {
+        this.player.stop();
+        this.player.setTexture(`player-${this.facing}`);
+      }
     }
   }
 

@@ -266,6 +266,14 @@ export class GameScene extends Phaser.Scene {
     return map;
   }
 
+  /** Simple deterministic hash from two coordinates. */
+  private hash(a: number, b: number, salt = 0): number {
+    let h = (a * 374761393 + b * 668265263 + salt) | 0;
+    h = Math.imul(h ^ (h >>> 13), 1274126177);
+    h = h ^ (h >>> 16);
+    return (h >>> 0) / 0x100000000; // 0..1
+  }
+
   private generateBuildings() {
     this.buildings = [];
 
@@ -278,20 +286,23 @@ export class GameScene extends Phaser.Scene {
         const colEnd = bCol * COL_PERIOD + BLOCK_INTERIOR.colEnd;
         const baseRow = bRow * ROW_PERIOD + BLOCK_INTERIOR.rowStart;
 
-        const depths = this.splitBlockDepth(BLOCK_INTERIOR.rows);
+        const depths = this.splitBlockDepth(BLOCK_INTERIOR.rows, bCol, bRow);
 
         let rowOffset = 0;
-        for (const depth of depths) {
-          const stories = 2 + Math.floor(Math.random() * 3);
-          const color = BUILDING_PALETTE[Math.floor(Math.random() * BUILDING_PALETTE.length)];
-          const texture = Math.floor(Math.random() * 6);
-          const inset = 0.2 + Math.random() * 0.6;
-          const heightOffset = Math.floor(Math.random() * 60);
-          const doorSide = Math.random() < 0.5 ? "left" as const : "right" as const;
-          const doorInset = 10 + Math.floor(Math.random() * 30);
-          const doorTexture = Math.floor(Math.random() * 9);
+        for (let i = 0; i < depths.length; i++) {
+          const depth = depths[i];
           const rowStart = baseRow + rowOffset;
           const rowEnd = Math.min(baseRow + rowOffset + depth - 1, this.mapRows - 1);
+          const h = (s: number) => this.hash(baseCol, rowStart, s);
+
+          const stories = 2 + Math.floor(h(1) * 3);
+          const color = BUILDING_PALETTE[Math.floor(h(2) * BUILDING_PALETTE.length)];
+          const texture = Math.floor(h(3) * 6);
+          const inset = 0.2 + h(4) * 0.6;
+          const heightOffset = Math.floor(h(5) * 60);
+          const doorSide = h(6) < 0.5 ? "left" as const : "right" as const;
+          const doorInset = 10 + Math.floor(h(7) * 30);
+          const doorTexture = Math.floor(h(8) * 9);
 
           this.buildings.push({
             colStart: baseCol,
@@ -314,9 +325,10 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
-  private splitBlockDepth(total: number): number[] {
+  private splitBlockDepth(total: number, bCol: number, bRow: number): number[] {
     const depths: number[] = [];
     let remaining = total;
+    let i = 0;
 
     while (remaining > 0) {
       if (remaining <= 9) {
@@ -330,9 +342,10 @@ export class GameScene extends Phaser.Scene {
 
       const maxDepth = Math.min(9, remaining - 5);
       const minDepth = 5;
-      const depth = minDepth + Math.floor(Math.random() * (maxDepth - minDepth + 1));
+      const depth = minDepth + Math.floor(this.hash(bCol * 100 + i, bRow, 99) * (maxDepth - minDepth + 1));
       depths.push(depth);
       remaining -= depth;
+      i++;
     }
 
     return depths;

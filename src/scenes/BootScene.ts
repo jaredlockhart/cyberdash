@@ -20,12 +20,12 @@ export class BootScene extends Phaser.Scene {
     for (const dir of DIRECTIONS) {
       this.load.image(`player-${dir}`, `assets/sprites/player/${dir}.png`);
       this.load.spritesheet(`walk-${dir}`, `assets/sprites/player/walk-${dir}.png`, {
-        frameWidth: 48,
-        frameHeight: 48,
+        frameWidth: 64,
+        frameHeight: 64,
       });
       this.load.spritesheet(`run-${dir}`, `assets/sprites/player/run-${dir}.png`, {
-        frameWidth: 48,
-        frameHeight: 48,
+        frameWidth: 64,
+        frameHeight: 64,
       });
     }
 

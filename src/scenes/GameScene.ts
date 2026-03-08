@@ -56,6 +56,7 @@ export class GameScene extends Phaser.Scene {
   private buildingData!: (BuildingTile | null)[][];
   private buildingChunks: {
     minCol: number; maxCol: number; minRow: number; maxRow: number;
+    blockCol: number; blockRow: number;
     tiles: Phaser.GameObjects.Graphics[];
   }[] = [];
 
@@ -232,13 +233,34 @@ export class GameScene extends Phaser.Scene {
     const pRow = (feetY / (this.tileHeight / 2) - this.player.x / (this.tileWidth / 2)) / 2;
     const margin = 16;
 
+    // Check if player is on a street/sidewalk (not inside a building)
+    const pColInt = Math.floor(pCol);
+    const pRowInt = Math.floor(pRow);
+    const inBounds = pColInt >= 0 && pColInt < this.mapCols && pRowInt >= 0 && pRowInt < this.mapRows;
+    const onStreet = inBounds && this.cityMap[pRowInt][pColInt] !== BUILDING;
+
+    // Determine which block is SE of the player (between player and camera)
+    const colMod = ((pColInt % COL_PERIOD) + COL_PERIOD) % COL_PERIOD;
+    const rowMod = ((pRowInt % ROW_PERIOD) + ROW_PERIOD) % ROW_PERIOD;
+    const playerBlockCol = Math.floor(pCol / COL_PERIOD);
+    const playerBlockRow = Math.floor(pRow / ROW_PERIOD);
+    // If player is past the building interior (east/south sidewalk), SE block is next period
+    const seBlockCol = colMod >= 22 ? playerBlockCol + 1 : playerBlockCol;
+    const seBlockRow = rowMod >= 38 ? playerBlockRow + 1 : playerBlockRow;
+
     for (const chunk of this.buildingChunks) {
+      // Existing NW occlusion (player behind building)
       const nearestCol = Math.max(chunk.minCol, Math.min(chunk.maxCol, pCol));
       const nearestRow = Math.max(chunk.minRow, Math.min(chunk.maxRow, pRow));
       const behind = pCol + pRow < nearestCol + nearestRow;
       const withinCol = pCol >= chunk.minCol - margin && pCol <= chunk.maxCol;
       const withinRow = pRow >= chunk.minRow - margin && pRow <= chunk.maxRow;
-      const hide = behind && withinCol && withinRow;
+      const hideBehind = behind && withinCol && withinRow;
+
+      // Hide the entire block SE of the player when on a street/sidewalk
+      const isSEBlock = onStreet && chunk.blockCol === seBlockCol && chunk.blockRow === seBlockRow;
+
+      const hide = hideBehind || isSEBlock;
 
       for (const g of chunk.tiles) {
         g.setVisible(!hide);
@@ -315,7 +337,7 @@ export class GameScene extends Phaser.Scene {
 
         let rowOffset = 0;
         for (const depth of depths) {
-          const stories = 1 + Math.floor(Math.random() * 3); // 1-3
+          const stories = 2 + Math.floor(Math.random() * 3); // 2-4
           const color = BUILDING_PALETTE[Math.floor(Math.random() * BUILDING_PALETTE.length)];
 
           // Fill all tiles for this building (full col width, varying row depth)
@@ -386,7 +408,7 @@ export class GameScene extends Phaser.Scene {
           const blockRow = Math.floor(row / ROW_PERIOD);
           const ck = `${blockCol},${blockRow},${Math.floor(relCol / chunkSize)},${Math.floor(relRow / chunkSize)}`;
           if (!chunkMap.has(ck)) {
-            chunkMap.set(ck, { minCol: col, maxCol: col, minRow: row, maxRow: row, tiles: [] });
+            chunkMap.set(ck, { minCol: col, maxCol: col, minRow: row, maxRow: row, blockCol, blockRow, tiles: [] });
           }
           const chunk = chunkMap.get(ck)!;
           chunk.minCol = Math.min(chunk.minCol, col);

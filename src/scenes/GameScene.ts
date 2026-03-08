@@ -31,6 +31,7 @@ const ROW_PERIOD = 40;
 interface BuildingTile {
   stories: number;
   color: { top: number; left: number; right: number };
+  texture: number; // 0-5, indexes into texture variants
 }
 
 // Dark cyberpunk color palette — base hues with consistent lighting
@@ -57,7 +58,7 @@ export class GameScene extends Phaser.Scene {
   private buildingChunks: {
     minCol: number; maxCol: number; minRow: number; maxRow: number;
     blockCol: number; blockRow: number;
-    tiles: Phaser.GameObjects.Graphics[];
+    tiles: Phaser.GameObjects.GameObject[];
   }[] = [];
 
   // Walk tuning
@@ -263,7 +264,7 @@ export class GameScene extends Phaser.Scene {
       const hide = hideBehind || isSEBlock;
 
       for (const g of chunk.tiles) {
-        g.setVisible(!hide);
+        (g as Phaser.GameObjects.Image).setVisible(!hide);
       }
     }
   }
@@ -339,12 +340,13 @@ export class GameScene extends Phaser.Scene {
         for (const depth of depths) {
           const stories = 2 + Math.floor(Math.random() * 3);
           const color = BUILDING_PALETTE[Math.floor(Math.random() * BUILDING_PALETTE.length)];
+          const texture = Math.floor(Math.random() * 6);
 
           // Fill all tiles for this building (full col width, varying row depth)
           for (let r = baseRow + rowOffset; r < baseRow + rowOffset + depth; r++) {
             for (let c = baseCol; c <= bCol * COL_PERIOD + blockInteriorColEnd; c++) {
               if (r < this.mapRows && c < this.mapCols && map[r][c] === BUILDING) {
-                this.buildingData[r][c] = { stories, color };
+                this.buildingData[r][c] = { stories, color, texture };
               }
             }
           }
@@ -392,15 +394,39 @@ export class GameScene extends Phaser.Scene {
 
     // Group building tiles into small chunks for clean rectangular occlusion
     const chunkSize = 6;
-    const chunkMap = new Map<string, { minCol: number; maxCol: number; minRow: number; maxRow: number; tiles: Phaser.GameObjects.Graphics[] }>();
+    const chunkMap = new Map<string, { minCol: number; maxCol: number; minRow: number; maxRow: number; blockCol: number; blockRow: number; tiles: Phaser.GameObjects.GameObject[] }>();
 
     for (let row = 0; row < this.mapRows; row++) {
       for (let col = 0; col < this.mapCols; col++) {
         const tile = map[row][col];
         if (tile === BUILDING) {
-          const g = this.add.graphics();
-          g.setDepth(col + row);
-          this.drawTile(g, col, row, BUILDING);
+          const bData = this.buildingData[row][col];
+          const tileObjects: Phaser.GameObjects.GameObject[] = [];
+
+          if (bData) {
+            const tw = this.tileWidth;
+            const th = this.tileHeight;
+            const bx = (col - row) * (tw / 2);
+            const by = (col + row) * (th / 2);
+            const tileDepth = bData.stories * STORY_HEIGHT;
+            const depth = col + row;
+            const v = bData.texture;
+
+            // Left wall
+            const leftImg = this.add.image(bx - tw / 2, by - tileDepth, `wall-left-v${v}-${bData.stories}s`);
+            leftImg.setOrigin(0, 0).setDepth(depth).setTint(bData.color.left);
+            tileObjects.push(leftImg);
+
+            // Right wall
+            const rightImg = this.add.image(bx, by + th / 2 - tileDepth, `wall-right-v${v}-${bData.stories}s`);
+            rightImg.setOrigin(0, 0).setDepth(depth).setTint(bData.color.right);
+            tileObjects.push(rightImg);
+
+            // Top face
+            const topImg = this.add.image(bx, by - tileDepth, `bldg-top-v${v}`);
+            topImg.setDepth(depth + 0.1).setTint(bData.color.top);
+            tileObjects.push(topImg);
+          }
 
           const relCol = (col % COL_PERIOD) - 10;
           const relRow = (row % ROW_PERIOD) - 10;
@@ -415,7 +441,7 @@ export class GameScene extends Phaser.Scene {
           chunk.maxCol = Math.max(chunk.maxCol, col);
           chunk.minRow = Math.min(chunk.minRow, row);
           chunk.maxRow = Math.max(chunk.maxRow, row);
-          chunk.tiles.push(g);
+          for (const obj of tileObjects) chunk.tiles.push(obj);
         } else if (tile === STREET) {
           const x = (col - row) * (this.tileWidth / 2);
           const y = (col + row) * (this.tileHeight / 2);

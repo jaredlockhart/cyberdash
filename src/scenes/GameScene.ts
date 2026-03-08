@@ -34,6 +34,8 @@ interface BuildingTile {
   texture: number; // 0-5, indexes into texture variants
   inset: number; // fractional tile inset from sidewalk (0.2-0.8)
   heightOffset: number; // random pixel offset added to base story height
+  doorSide: "left" | "right"; // which end of the SE wall gets the door
+  buildingMaxRow: number; // last row of this building (SE edge)
 }
 
 // Dark cyberpunk color palette — base hues with consistent lighting
@@ -345,12 +347,14 @@ export class GameScene extends Phaser.Scene {
           const texture = Math.floor(Math.random() * 6);
           const inset = 0.2 + Math.random() * 0.6; // fractional tile inset (0.2-0.8)
           const heightOffset = Math.floor(Math.random() * 60); // 0 to 60 pixels taller
+          const doorSide = Math.random() < 0.5 ? "left" as const : "right" as const;
+          const buildingMaxRow = Math.min(baseRow + rowOffset + depth - 1, this.mapRows - 1);
 
           // Fill all tiles for this building (full col width, varying row depth)
           for (let r = baseRow + rowOffset; r < baseRow + rowOffset + depth; r++) {
             for (let c = baseCol; c <= bCol * COL_PERIOD + blockInteriorColEnd; c++) {
               if (r < this.mapRows && c < this.mapCols && map[r][c] === BUILDING) {
-                this.buildingData[r][c] = { stories, color, texture, inset, heightOffset };
+                this.buildingData[r][c] = { stories, color, texture, inset, heightOffset, doorSide, buildingMaxRow };
               }
             }
           }
@@ -433,12 +437,12 @@ export class GameScene extends Phaser.Scene {
             const wallImgHeight = 16 + bData.stories * STORY_HEIGHT;
             const scaleY = (tileDepth + 16) / wallImgHeight;
 
-            // Left wall
+            // NW back wall (code "left wall" image: W-to-S edge)
             const leftImg = this.add.image(bx - tw / 2, by - tileDepth, `wall-left-v${v}-${bData.stories}s`);
             leftImg.setOrigin(0, 0).setDepth(depth).setTint(bData.color.left).setScale(1, scaleY);
             tileObjects.push(leftImg);
 
-            // Right wall
+            // NE back wall (code "right wall" image: E-to-S edge)
             const rightImg = this.add.image(bx, by - tileDepth, `wall-right-v${v}-${bData.stories}s`);
             rightImg.setOrigin(0, 0).setDepth(depth).setTint(bData.color.right).setScale(1, scaleY);
             tileObjects.push(rightImg);
@@ -447,6 +451,29 @@ export class GameScene extends Phaser.Scene {
             const topImg = this.add.image(bx, by - tileDepth, `bldg-top-v${v}`);
             topImg.setDepth(depth + 0.1).setTint(bData.color.top);
             tileObjects.push(topImg);
+
+            // Door on the SE wall (N-to-E edge, visible on RIGHT side of building)
+            // SE wall is exposed at colMod 21 (building's east edge)
+            if (row === bData.buildingMaxRow && (col % COL_PERIOD) === 21) {
+              const dw = 28;
+              const dh = STORY_HEIGHT * 0.75;
+              const xoff = 2;
+
+              // SE wall (E-to-S edge): slope -0.5, ground at S vertex (bx, by+16)
+              const x0 = bx + xoff;
+              const y0 = by + th / 2 - xoff * 0.5;
+
+              const doorGfx = this.add.graphics();
+              doorGfx.setDepth(depth + 0.5);
+              doorGfx.fillStyle(0xff0000, 1); // bright red for now
+              doorGfx.fillPoints([
+                new Phaser.Geom.Point(x0, y0),
+                new Phaser.Geom.Point(x0 + dw, y0 - dw * 0.5),
+                new Phaser.Geom.Point(x0 + dw, y0 - dw * 0.5 - dh),
+                new Phaser.Geom.Point(x0, y0 - dh),
+              ], true);
+              tileObjects.push(doorGfx);
+            }
           }
 
           const relCol = (col % COL_PERIOD) - 10;

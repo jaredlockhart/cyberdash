@@ -17,15 +17,34 @@ const SIDEWALK = 2;
 
 // Isometric tile colors: top face, left face, right face
 const TILE_COLORS: Record<number, { top: number; left: number; right: number }> = {
-  [BUILDING]: { top: 0x1a1a2e, left: 0x121225, right: 0x0f0f1e },
   [STREET]: { top: 0x2a2a2a, left: 0x222222, right: 0x1a1a1a },
   [SIDEWALK]: { top: 0x3a3a4a, left: 0x30303e, right: 0x282835 },
 };
 
 const STREET_LINE = 0x3a3a3a;
-const BUILDING_HEIGHT = 192;
+const STORY_HEIGHT = 128;
 const COL_PERIOD = 24;
 const ROW_PERIOD = 40;
+
+// Building data per tile (null for non-building tiles)
+interface BuildingTile {
+  stories: number;
+  color: { top: number; left: number; right: number };
+}
+
+// Dark cyberpunk color palette — base hues with consistent lighting
+const BUILDING_PALETTE: { top: number; left: number; right: number }[] = [
+  { top: 0x1a1a2e, left: 0x121225, right: 0x0f0f1e }, // dark indigo (original)
+  { top: 0x1e1a2e, left: 0x161225, right: 0x120f1e }, // dark purple
+  { top: 0x2e1a1a, left: 0x251212, right: 0x1e0f0f }, // dark crimson
+  { top: 0x1a2e2e, left: 0x122525, right: 0x0f1e1e }, // dark teal
+  { top: 0x2e2e1a, left: 0x252512, right: 0x1e1e0f }, // dark olive
+  { top: 0x1a1e2e, left: 0x121625, right: 0x0f121e }, // dark navy
+  { top: 0x2e1a2e, left: 0x251225, right: 0x1e0f1e }, // dark magenta
+  { top: 0x1a2e1e, left: 0x122516, right: 0x0f1e12 }, // dark forest
+  { top: 0x222233, left: 0x1a1a28, right: 0x141420 }, // steel blue
+  { top: 0x2a1a28, left: 0x22121f, right: 0x1b0f19 }, // dark plum
+];
 
 export class GameScene extends Phaser.Scene {
   private player!: Phaser.GameObjects.Sprite;
@@ -33,6 +52,7 @@ export class GameScene extends Phaser.Scene {
   private shiftKey!: Phaser.Input.Keyboard.Key;
   private facing: Direction = "south";
   private cityMap!: number[][];
+  private buildingData!: (BuildingTile | null)[][];
   private buildingChunks: {
     minCol: number; maxCol: number; minRow: number; maxRow: number;
     tiles: Phaser.GameObjects.Graphics[];
@@ -121,6 +141,30 @@ export class GameScene extends Phaser.Scene {
       .setResolution(dpr)
       .setScrollFactor(0)
       .setDepth(1000);
+
+    // Isometric compass (NW/NE/SW/SE aligned to iso axes)
+    const compass = this.add.graphics();
+    compass.setScrollFactor(0);
+    compass.setDepth(1000);
+    const cx = 900, cy = 60, cLen = 20;
+    // NW-SE axis (vertical-ish on screen: up-left to down-right)
+    compass.lineStyle(1, 0x555555);
+    compass.lineBetween(cx - cLen, cy - cLen / 2, cx + cLen, cy + cLen / 2);
+    // NE-SW axis
+    compass.lineBetween(cx + cLen, cy - cLen / 2, cx - cLen, cy + cLen / 2);
+
+    const compassLabel = (text: string, ox: number, oy: number) => {
+      this.add.text(cx + ox, cy + oy, text, {
+        fontFamily: "Arial, Helvetica, sans-serif",
+        fontSize: "8px",
+        color: "#888888",
+      }).setOrigin(0.5).setResolution(dpr).setScrollFactor(0).setDepth(1000);
+    };
+    compassLabel("NW", -cLen - 8, -cLen / 2 - 6);
+    compassLabel("SE", cLen + 8, cLen / 2 + 6);
+    compassLabel("NE", cLen + 8, -cLen / 2 - 6);
+    compassLabel("SW", -cLen - 8, cLen / 2 + 6);
+    compassLabel("N", 0, -cLen / 2 - 10);
 
     this.cursors = this.input.keyboard!.createCursorKeys();
     this.shiftKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.SHIFT);
@@ -239,7 +283,78 @@ export class GameScene extends Phaser.Scene {
       }
     }
 
+    this.generateBuildings(map);
     return map;
+  }
+
+  private generateBuildings(map: number[][]) {
+    // Initialize buildingData with nulls
+    this.buildingData = [];
+    for (let row = 0; row < this.mapRows; row++) {
+      this.buildingData[row] = new Array(this.mapCols).fill(null);
+    }
+
+    // Buildings span the full 12-col width and vary in depth along the 28-row axis.
+    // SE side is the storefront; buildings pack NW from there.
+    const blockInteriorRowStart = 10;
+    const blockInteriorRows = 28; // rowMod 10-37
+    const blockInteriorColStart = 10;
+    const blockInteriorColEnd = 21;
+
+    const numBlockCols = Math.floor(this.mapCols / COL_PERIOD);
+    const numBlockRows = Math.floor(this.mapRows / ROW_PERIOD);
+
+    for (let bRow = 0; bRow < numBlockRows; bRow++) {
+      for (let bCol = 0; bCol < numBlockCols; bCol++) {
+        const baseCol = bCol * COL_PERIOD + blockInteriorColStart;
+        const baseRow = bRow * ROW_PERIOD + blockInteriorRowStart;
+
+        // Split 28 rows into buildings with depths 5-9
+        const depths = this.splitBlockDepth(blockInteriorRows);
+
+        let rowOffset = 0;
+        for (const depth of depths) {
+          const stories = 1 + Math.floor(Math.random() * 3); // 1-3
+          const color = BUILDING_PALETTE[Math.floor(Math.random() * BUILDING_PALETTE.length)];
+
+          // Fill all tiles for this building (full col width, varying row depth)
+          for (let r = baseRow + rowOffset; r < baseRow + rowOffset + depth; r++) {
+            for (let c = baseCol; c <= bCol * COL_PERIOD + blockInteriorColEnd; c++) {
+              if (r < this.mapRows && c < this.mapCols && map[r][c] === BUILDING) {
+                this.buildingData[r][c] = { stories, color };
+              }
+            }
+          }
+
+          rowOffset += depth;
+        }
+      }
+    }
+  }
+
+  private splitBlockDepth(total: number): number[] {
+    // Randomly split `total` into segments of 5-9
+    const depths: number[] = [];
+    let remaining = total;
+
+    while (remaining > 0) {
+      if (remaining <= 9) {
+        if (remaining >= 5) {
+          depths.push(remaining);
+        } else {
+          depths[depths.length - 1] += remaining;
+        }
+        break;
+      }
+
+      const maxDepth = Math.min(9, remaining - 5); // leave at least 5 for next
+      const minDepth = 5;
+      const depth = minDepth + Math.floor(Math.random() * (maxDepth - minDepth + 1));
+      depths.push(depth);
+      remaining -= depth;
+    }
+
+    return depths;
   }
 
   private drawCityMap(map: number[][]) {
@@ -284,10 +399,12 @@ export class GameScene extends Phaser.Scene {
   private drawTile(graphics: Phaser.GameObjects.Graphics, col: number, row: number, tile: number) {
     const tw = this.tileWidth;
     const th = this.tileHeight;
-    const colors = TILE_COLORS[tile];
     const x = (col - row) * (tw / 2);
     const y = (col + row) * (th / 2);
-    const tileDepth = tile === BUILDING ? BUILDING_HEIGHT : 0;
+
+    const bData = tile === BUILDING ? this.buildingData[row][col] : null;
+    const colors = bData ? bData.color : TILE_COLORS[tile];
+    const tileDepth = bData ? bData.stories * STORY_HEIGHT : 0;
 
     graphics.fillStyle(colors.top, 1);
     graphics.fillPoints(

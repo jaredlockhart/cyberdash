@@ -229,7 +229,7 @@ export class GameScene extends Phaser.Scene {
     // Hide building chunks when player is behind them (use feet position for iso coords)
     const pCol = (this.player.x / (this.tileWidth / 2) + feetY / (this.tileHeight / 2)) / 2;
     const pRow = (feetY / (this.tileHeight / 2) - this.player.x / (this.tileWidth / 2)) / 2;
-    const margin = 6;
+    const margin = 16;
 
     for (const chunk of this.buildingChunks) {
       const nearestCol = Math.max(chunk.minCol, Math.min(chunk.maxCol, pCol));
@@ -387,6 +387,10 @@ export class GameScene extends Phaser.Scene {
           chunk.minRow = Math.min(chunk.minRow, row);
           chunk.maxRow = Math.max(chunk.maxRow, row);
           chunk.tiles.push(g);
+        } else if (tile === STREET) {
+          const x = (col - row) * (this.tileWidth / 2);
+          const y = (col + row) * (this.tileHeight / 2);
+          this.add.image(x, y, "street").setDepth(0);
         } else {
           this.drawTile(ground, col, row, tile);
         }

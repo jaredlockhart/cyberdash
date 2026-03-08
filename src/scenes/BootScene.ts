@@ -28,6 +28,9 @@ export class BootScene extends Phaser.Scene {
         frameHeight: 48,
       });
     }
+
+    // Tiles
+    this.load.image("street", "assets/tilemaps/street_0.png");
   }
 
   create() {

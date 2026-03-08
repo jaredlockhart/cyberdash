@@ -100,7 +100,7 @@ export class GameScene extends Phaser.Scene {
       // Play walk or run animation
       const prefix = running ? "run" : "walk";
       const animKey = `${prefix}-${this.facing}`;
-      if (this.player.anims.currentAnim?.key !== animKey) {
+      if (this.player.anims.currentAnim?.key !== animKey || !this.player.anims.isPlaying) {
         this.player.stop();
         this.player.play(animKey);
       }

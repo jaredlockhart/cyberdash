@@ -74,6 +74,42 @@ export function renderBuilding(
   ], true);
   objects.push(roofGfx);
 
+  // --- Wall flat fills (backdrops behind texture images to cover gaps) ---
+
+  const seWallGfx = scene.add.graphics();
+  seWallGfx.setDepth(building.colEnd + building.rowStart - 0.1);
+  seWallGfx.fillStyle(building.color.right, 1);
+  seWallGfx.fillPoints([
+    new Phaser.Geom.Point(E.x, E.y),
+    new Phaser.Geom.Point(S.x, S.y),
+    new Phaser.Geom.Point(Sr.x, Sr.y),
+    new Phaser.Geom.Point(Er.x, Er.y),
+  ], true);
+  objects.push(seWallGfx);
+
+  const swWallGfx = scene.add.graphics();
+  swWallGfx.setDepth(building.colStart + building.rowEnd - 0.1);
+  swWallGfx.fillStyle(building.color.left, 1);
+  swWallGfx.fillPoints([
+    new Phaser.Geom.Point(S.x, S.y),
+    new Phaser.Geom.Point(W.x, W.y),
+    new Phaser.Geom.Point(Wr.x, Wr.y),
+    new Phaser.Geom.Point(Sr.x, Sr.y),
+  ], true);
+  objects.push(swWallGfx);
+
+  // --- Door position (computed early so SE wall can skip overlapping tiles) ---
+
+  const doorWidth = 48;
+  const seWallLen = E.x - S.x;
+  const doorMargin = building.doorInset;
+  const doorAlong = building.doorSide === "left" ? doorMargin : seWallLen - doorWidth - doorMargin;
+  const doorCenterAlong = doorAlong + doorWidth / 2;
+  const doorX = S.x + doorCenterAlong;
+  const doorY = S.y - doorCenterAlong * 0.5 + TILE_H / 2;
+  const doorT = seWallLen > 0 ? doorCenterAlong / seWallLen : 0;
+  const doorRow = building.rowEnd + (building.rowStart - building.rowEnd) * doorT;
+
   // --- Texture images with per-tile depth ---
 
   const wallImgHeight = 16 + building.stories * STORY_HEIGHT;
@@ -105,16 +141,11 @@ export function renderBuilding(
     }
   }
 
-  // Door image on SE wall (left = near S vertex, right = near E vertex)
-  const doorWidth = 48;
-  const seWallLen = E.x - S.x;
-  const doorMargin = building.doorInset;
-  const doorAlong = building.doorSide === "left" ? doorMargin : seWallLen - doorWidth - doorMargin;
-  const doorCenterAlong = doorAlong + doorWidth / 2;
-  const doorX = S.x + doorCenterAlong;
-  const doorY = S.y - doorCenterAlong * 0.5 + TILE_H / 2;
+  // Door image on SE wall — depth must be above the closest-to-camera wall tile it overlaps
+  const doorNearRow = Math.min(building.rowEnd,
+    Math.floor(building.rowEnd - (doorAlong - TILE_W) / (TILE_W / 2)));
   const doorImg = scene.add.image(doorX, doorY, `door-${building.doorTexture}`);
-  doorImg.setOrigin(0.5, 1).setDepth(depth + 0.5);
+  doorImg.setOrigin(0.5, 1).setDepth(building.colEnd + doorNearRow + 0.1);
   objects.push(doorImg);
 
   return objects;

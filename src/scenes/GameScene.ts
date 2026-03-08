@@ -418,7 +418,7 @@ export class GameScene extends Phaser.Scene {
             tileObjects.push(leftImg);
 
             // Right wall
-            const rightImg = this.add.image(bx, by + th / 2 - tileDepth, `wall-right-v${v}-${bData.stories}s`);
+            const rightImg = this.add.image(bx, by - tileDepth, `wall-right-v${v}-${bData.stories}s`);
             rightImg.setOrigin(0, 0).setDepth(depth).setTint(bData.color.right);
             tileObjects.push(rightImg);
 

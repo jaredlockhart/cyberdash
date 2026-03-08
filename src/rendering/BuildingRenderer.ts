@@ -62,33 +62,8 @@ export function renderBuilding(
   const Sr = { x: S.x, y: S.y - wallHeight };
   const Wr = { x: W.x, y: W.y - wallHeight };
 
-  // --- Flat fill base layers (covers any sub-pixel gaps between tiled images) ---
+  // --- Roof flat fill (covers gaps between tiled diamond images) ---
 
-  // SE wall fill
-  const seGfx = scene.add.graphics();
-  seGfx.setDepth(depth);
-  seGfx.fillStyle(building.color.right, 1);
-  seGfx.fillPoints([
-    new Phaser.Geom.Point(E.x, E.y),
-    new Phaser.Geom.Point(S.x, S.y),
-    new Phaser.Geom.Point(Sr.x, Sr.y),
-    new Phaser.Geom.Point(Er.x, Er.y),
-  ], true);
-  objects.push(seGfx);
-
-  // SW wall fill
-  const swGfx = scene.add.graphics();
-  swGfx.setDepth(depth);
-  swGfx.fillStyle(building.color.left, 1);
-  swGfx.fillPoints([
-    new Phaser.Geom.Point(S.x, S.y),
-    new Phaser.Geom.Point(W.x, W.y),
-    new Phaser.Geom.Point(Wr.x, Wr.y),
-    new Phaser.Geom.Point(Sr.x, Sr.y),
-  ], true);
-  objects.push(swGfx);
-
-  // Roof fill
   const roofGfx = scene.add.graphics();
   roofGfx.setDepth(depth + 0.1);
   roofGfx.fillStyle(building.color.top, 1);
@@ -100,7 +75,7 @@ export function renderBuilding(
   ], true);
   objects.push(roofGfx);
 
-  // --- Texture image overlays ---
+  // --- Texture images with per-tile depth ---
 
   const wallImgHeight = 16 + building.stories * STORY_HEIGHT;
   const scaleY = (wallHeight + 16) / wallImgHeight;
@@ -109,7 +84,7 @@ export function renderBuilding(
   for (let row = building.rowStart; row <= building.rowEnd; row++) {
     const pos = tileInsetPosition(building, building.colEnd, row);
     const img = scene.add.image(pos.x, pos.y - wallHeight, `wall-right-v${v}-${building.stories}s`);
-    img.setOrigin(0, 0).setDepth(depth + 0.02).setTint(building.color.right).setScale(1, scaleY);
+    img.setOrigin(0, 0).setDepth(building.colEnd + row).setTint(building.color.right).setScale(1, scaleY);
     objects.push(img);
   }
 
@@ -117,7 +92,7 @@ export function renderBuilding(
   for (let col = building.colStart; col <= building.colEnd; col++) {
     const pos = tileInsetPosition(building, col, building.rowEnd);
     const img = scene.add.image(pos.x - TILE_W / 2, pos.y - wallHeight, `wall-left-v${v}-${building.stories}s`);
-    img.setOrigin(0, 0).setDepth(depth + 0.02).setTint(building.color.left).setScale(1, scaleY);
+    img.setOrigin(0, 0).setDepth(col + building.rowEnd).setTint(building.color.left).setScale(1, scaleY);
     objects.push(img);
   }
 

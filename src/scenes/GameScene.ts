@@ -35,16 +35,16 @@ interface BuildingTile {
 
 // Dark cyberpunk color palette — base hues with consistent lighting
 const BUILDING_PALETTE: { top: number; left: number; right: number }[] = [
-  { top: 0x1a1a2e, left: 0x121225, right: 0x0f0f1e }, // dark indigo (original)
-  { top: 0x1e1a2e, left: 0x161225, right: 0x120f1e }, // dark purple
-  { top: 0x2e1a1a, left: 0x251212, right: 0x1e0f0f }, // dark crimson
-  { top: 0x1a2e2e, left: 0x122525, right: 0x0f1e1e }, // dark teal
-  { top: 0x2e2e1a, left: 0x252512, right: 0x1e1e0f }, // dark olive
-  { top: 0x1a1e2e, left: 0x121625, right: 0x0f121e }, // dark navy
-  { top: 0x2e1a2e, left: 0x251225, right: 0x1e0f1e }, // dark magenta
-  { top: 0x1a2e1e, left: 0x122516, right: 0x0f1e12 }, // dark forest
-  { top: 0x222233, left: 0x1a1a28, right: 0x141420 }, // steel blue
-  { top: 0x2a1a28, left: 0x22121f, right: 0x1b0f19 }, // dark plum
+  { top: 0x2a2a2a, left: 0x202020, right: 0x181818 }, // dark grey
+  { top: 0x2e2e2e, left: 0x242424, right: 0x1c1c1c }, // medium dark grey
+  { top: 0x232323, left: 0x1a1a1a, right: 0x141414 }, // charcoal
+  { top: 0x282830, left: 0x1e1e26, right: 0x18181e }, // blue-grey
+  { top: 0x2a2a32, left: 0x202028, right: 0x1a1a20 }, // steel grey
+  { top: 0x242832, left: 0x1c1e28, right: 0x161820 }, // slate blue-grey
+  { top: 0x2e2828, left: 0x241e1e, right: 0x1c1818 }, // reddish grey
+  { top: 0x302a2a, left: 0x262020, right: 0x1e1818 }, // warm grey
+  { top: 0x2a2420, left: 0x201c18, right: 0x181410 }, // dark brown
+  { top: 0x2c2622, left: 0x221e1a, right: 0x1a1612 }, // warm brown
 ];
 
 export class GameScene extends Phaser.Scene {
@@ -99,8 +99,8 @@ export class GameScene extends Phaser.Scene {
     }
 
     // Spawn player on a street tile
-    const spawnCol = 7;
-    const spawnRow = 7;
+    const spawnCol = 4 + COL_PERIOD;
+    const spawnRow = 4 + ROW_PERIOD;
     const spawnX = (spawnCol - spawnRow) * (this.tileWidth / 2);
     const spawnY = (spawnCol + spawnRow) * (this.tileHeight / 2);
 
@@ -337,7 +337,7 @@ export class GameScene extends Phaser.Scene {
 
         let rowOffset = 0;
         for (const depth of depths) {
-          const stories = 2 + Math.floor(Math.random() * 3); // 2-4
+          const stories = 2 + Math.floor(Math.random() * 3);
           const color = BUILDING_PALETTE[Math.floor(Math.random() * BUILDING_PALETTE.length)];
 
           // Fill all tiles for this building (full col width, varying row depth)

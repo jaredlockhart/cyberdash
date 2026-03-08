@@ -1,8 +1,8 @@
 import Phaser from "phaser";
 import { TILE_W, TILE_H, isoToScreen, screenToIso } from "../iso/IsoGeometry";
-import { COL_PERIOD, ROW_PERIOD, BLOCK_INTERIOR, TileType, STORY_HEIGHT } from "../iso/CityLayout";
-import { BuildingTile, BUILDING_PALETTE } from "../rendering/BuildingTypes";
-import { renderBuildingTile } from "../rendering/BuildingRenderer";
+import { COL_PERIOD, ROW_PERIOD, BLOCK_INTERIOR, TileType, CURB_HEIGHT } from "../iso/CityLayout";
+import { Building, BUILDING_PALETTE } from "../rendering/BuildingTypes";
+import { renderBuilding } from "../rendering/BuildingRenderer";
 import { renderStreetTile, renderSidewalkTile } from "../rendering/StreetRenderer";
 
 type Direction =
@@ -21,11 +21,11 @@ export class GameScene extends Phaser.Scene {
   private shiftKey!: Phaser.Input.Keyboard.Key;
   private facing: Direction = "south";
   private cityMap!: number[][];
-  private buildingData!: (BuildingTile | null)[][];
-  private buildingChunks: {
-    minCol: number; maxCol: number; minRow: number; maxRow: number;
+  private buildings: Building[] = [];
+  private buildingObjects: {
+    data: Building;
     blockCol: number; blockRow: number;
-    tiles: Phaser.GameObjects.GameObject[];
+    objects: Phaser.GameObjects.GameObject[];
   }[] = [];
 
   // Walk tuning
@@ -205,20 +205,21 @@ export class GameScene extends Phaser.Scene {
     const seBlockCol = colMod >= 22 ? playerBlockCol + 1 : playerBlockCol;
     const seBlockRow = rowMod >= 38 ? playerBlockRow + 1 : playerBlockRow;
 
-    for (const chunk of this.buildingChunks) {
-      const nearestCol = Math.max(chunk.minCol, Math.min(chunk.maxCol, pCol));
-      const nearestRow = Math.max(chunk.minRow, Math.min(chunk.maxRow, pRow));
+    for (const entry of this.buildingObjects) {
+      const b = entry.data;
+      const nearestCol = Math.max(b.colStart, Math.min(b.colEnd, pCol));
+      const nearestRow = Math.max(b.rowStart, Math.min(b.rowEnd, pRow));
       const behind = pCol + pRow < nearestCol + nearestRow;
-      const withinCol = pCol >= chunk.minCol - margin && pCol <= chunk.maxCol;
-      const withinRow = pRow >= chunk.minRow - margin && pRow <= chunk.maxRow;
+      const withinCol = pCol >= b.colStart - margin && pCol <= b.colEnd;
+      const withinRow = pRow >= b.rowStart - margin && pRow <= b.rowEnd;
       const hideBehind = behind && withinCol && withinRow;
 
-      const isSEBlock = onStreet && chunk.blockCol === seBlockCol && chunk.blockRow === seBlockRow;
+      const isSEBlock = onStreet && entry.blockCol === seBlockCol && entry.blockRow === seBlockRow;
 
       const hide = hideBehind || isSEBlock;
 
-      for (const g of chunk.tiles) {
-        (g as Phaser.GameObjects.Image).setVisible(!hide);
+      for (const obj of entry.objects) {
+        (obj as Phaser.GameObjects.Graphics).setVisible(!hide);
       }
     }
   }
@@ -261,15 +262,12 @@ export class GameScene extends Phaser.Scene {
       }
     }
 
-    this.generateBuildings(map);
+    this.generateBuildings();
     return map;
   }
 
-  private generateBuildings(map: number[][]) {
-    this.buildingData = [];
-    for (let row = 0; row < this.mapRows; row++) {
-      this.buildingData[row] = new Array(this.mapCols).fill(null);
-    }
+  private generateBuildings() {
+    this.buildings = [];
 
     const numBlockCols = Math.floor(this.mapCols / COL_PERIOD);
     const numBlockRows = Math.floor(this.mapRows / ROW_PERIOD);
@@ -277,6 +275,7 @@ export class GameScene extends Phaser.Scene {
     for (let bRow = 0; bRow < numBlockRows; bRow++) {
       for (let bCol = 0; bCol < numBlockCols; bCol++) {
         const baseCol = bCol * COL_PERIOD + BLOCK_INTERIOR.colStart;
+        const colEnd = bCol * COL_PERIOD + BLOCK_INTERIOR.colEnd;
         const baseRow = bRow * ROW_PERIOD + BLOCK_INTERIOR.rowStart;
 
         const depths = this.splitBlockDepth(BLOCK_INTERIOR.rows);
@@ -289,15 +288,21 @@ export class GameScene extends Phaser.Scene {
           const inset = 0.2 + Math.random() * 0.6;
           const heightOffset = Math.floor(Math.random() * 60);
           const doorSide = Math.random() < 0.5 ? "left" as const : "right" as const;
-          const buildingMaxRow = Math.min(baseRow + rowOffset + depth - 1, this.mapRows - 1);
+          const rowStart = baseRow + rowOffset;
+          const rowEnd = Math.min(baseRow + rowOffset + depth - 1, this.mapRows - 1);
 
-          for (let r = baseRow + rowOffset; r < baseRow + rowOffset + depth; r++) {
-            for (let c = baseCol; c <= bCol * COL_PERIOD + BLOCK_INTERIOR.colEnd; c++) {
-              if (r < this.mapRows && c < this.mapCols && map[r][c] === TileType.BUILDING) {
-                this.buildingData[r][c] = { stories, color, texture, inset, heightOffset, doorSide, buildingMaxRow };
-              }
-            }
-          }
+          this.buildings.push({
+            colStart: baseCol,
+            colEnd,
+            rowStart,
+            rowEnd,
+            stories,
+            color,
+            texture,
+            inset,
+            heightOffset,
+            doorSide,
+          });
 
           rowOffset += depth;
         }
@@ -337,44 +342,14 @@ export class GameScene extends Phaser.Scene {
     const streetLines = this.add.graphics();
     streetLines.setDepth(0.5);
 
-    const chunkSize = 6;
-    const chunkMap = new Map<string, {
-      minCol: number; maxCol: number; minRow: number; maxRow: number;
-      blockCol: number; blockRow: number;
-      tiles: Phaser.GameObjects.GameObject[];
-    }>();
-
     for (let row = 0; row < this.mapRows; row++) {
       for (let col = 0; col < this.mapCols; col++) {
         const tile = this.cityMap[row][col];
 
         if (tile === TileType.BUILDING) {
-          const bData = this.buildingData[row][col];
-          let tileObjects: Phaser.GameObjects.GameObject[] = [];
-
-          if (bData) {
-            tileObjects = renderBuildingTile(this, col, row, bData);
-          } else {
-            // Sidewalk ground for building tiles without data
-            const { x, y } = isoToScreen(col, row);
-            this.add.image(x, y - 6, "sidewalk").setDepth(0.6);
-          }
-
-          // Register into chunks
-          const relCol = (col % COL_PERIOD) - 10;
-          const relRow = (row % ROW_PERIOD) - 10;
-          const blockCol = Math.floor(col / COL_PERIOD);
-          const blockRow = Math.floor(row / ROW_PERIOD);
-          const ck = `${blockCol},${blockRow},${Math.floor(relCol / chunkSize)},${Math.floor(relRow / chunkSize)}`;
-          if (!chunkMap.has(ck)) {
-            chunkMap.set(ck, { minCol: col, maxCol: col, minRow: row, maxRow: row, blockCol, blockRow, tiles: [] });
-          }
-          const chunk = chunkMap.get(ck)!;
-          chunk.minCol = Math.min(chunk.minCol, col);
-          chunk.maxCol = Math.max(chunk.maxCol, col);
-          chunk.minRow = Math.min(chunk.minRow, row);
-          chunk.maxRow = Math.max(chunk.maxRow, row);
-          for (const obj of tileObjects) chunk.tiles.push(obj);
+          // Sidewalk ground under buildings (visible through inset gaps)
+          const { x, y } = isoToScreen(col, row);
+          this.add.image(x, y - CURB_HEIGHT, "sidewalk").setDepth(0.6);
 
         } else if (tile === TileType.STREET) {
           renderStreetTile(this, col, row, streetLines);
@@ -385,6 +360,12 @@ export class GameScene extends Phaser.Scene {
       }
     }
 
-    this.buildingChunks = Array.from(chunkMap.values());
+    // Render buildings as 3-shape parallelograms
+    for (const building of this.buildings) {
+      const objects = renderBuilding(this, building);
+      const blockCol = Math.floor(building.colStart / COL_PERIOD);
+      const blockRow = Math.floor(building.rowStart / ROW_PERIOD);
+      this.buildingObjects.push({ data: building, blockCol, blockRow, objects });
+    }
   }
 }

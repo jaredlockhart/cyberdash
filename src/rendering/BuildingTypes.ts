@@ -6,14 +6,17 @@ export interface TileColors {
   right: number;
 }
 
-export interface BuildingTile {
+export interface Building {
+  colStart: number;    // first col (absolute grid coords)
+  colEnd: number;      // last col (inclusive)
+  rowStart: number;    // first row
+  rowEnd: number;      // last row (inclusive)
   stories: number;
   color: TileColors;
-  texture: number; // 0-5, indexes into texture variants
-  inset: number; // fractional tile inset from sidewalk (0.2-0.8)
+  texture: number;     // 0-5, indexes into texture variants
+  inset: number;       // fractional tile inset from sidewalk (0.2-0.8)
   heightOffset: number; // random pixel offset added to base story height
-  doorSide: "left" | "right"; // which end of the SE wall gets the door
-  buildingMaxRow: number; // last row of this building (SE edge)
+  doorSide: "left" | "right";
 }
 
 // Dark cyberpunk color palette — base hues with consistent lighting

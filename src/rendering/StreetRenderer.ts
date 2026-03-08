@@ -1,6 +1,6 @@
 import Phaser from "phaser";
 import { TILE_W, TILE_H, isoToScreen } from "../iso/IsoGeometry";
-import { COL_PERIOD, ROW_PERIOD, CURB_HEIGHT } from "../iso/CityLayout";
+import { COL_PERIOD, ROW_PERIOD, STREET_WIDTH, SIDEWALK_WIDTH, CURB_HEIGHT } from "../iso/CityLayout";
 import { TILE_COLORS } from "./BuildingTypes";
 import { TileType } from "../iso/CityLayout";
 
@@ -14,12 +14,11 @@ export function renderStreetTile(
   streetLines: Phaser.GameObjects.Graphics,
 ): void {
   const { x, y } = isoToScreen(col, row);
-  scene.add.image(x, y, "street").setDepth(0);
 
   const colMod = col % COL_PERIOD;
   const rowMod = row % ROW_PERIOD;
-  const inStreetCol = colMod < 8;
-  const inStreetRow = rowMod < 8;
+  const inStreetCol = colMod < STREET_WIDTH;
+  const inStreetRow = rowMod < STREET_WIDTH;
   const isIntersection = inStreetCol && inStreetRow;
 
   if (isIntersection) return;
@@ -27,11 +26,22 @@ export function renderStreetTile(
   const tw = TILE_W;
   const th = TILE_H;
 
+  const centerCol = Math.floor(STREET_WIDTH / 2);  // 4
+  const cwNear = STREET_WIDTH;                       // 8 — first crosswalk tile
+  const cwNearEnd = STREET_WIDTH + 1;                // 9
+  const cwFarRow = ROW_PERIOD - 2;                   // 54
+  const cwFarRowEnd = ROW_PERIOD - 1;                // 55
+  const cwFarCol = COL_PERIOD - 2;                   // 34
+  const cwFarColEnd = COL_PERIOD - 1;                // 35
+  const stopNear = STREET_WIDTH + 2;                 // 10
+  const stopFarRow = ROW_PERIOD - 3;                 // 53
+  const stopFarCol = COL_PERIOD - 3;                 // 33
+
   // Double yellow center lines
-  const isCenter = inStreetCol ? colMod === 4 : rowMod === 4;
+  const isCenter = inStreetCol ? colMod === centerCol : rowMod === centerCol;
   const nearCrosswalk = inStreetCol
-    ? (rowMod >= 7 && rowMod <= 10) || (rowMod >= 37 && rowMod <= 39)
-    : (colMod >= 7 && colMod <= 10) || (colMod >= 21 && colMod <= 23);
+    ? (rowMod >= cwNear - 1 && rowMod <= stopNear) || (rowMod >= stopFarRow && rowMod <= cwFarRowEnd)
+    : (colMod >= cwNear - 1 && colMod <= stopNear) || (colMod >= stopFarCol && colMod <= cwFarColEnd);
 
   if (isCenter && !nearCrosswalk) {
     const ext = 16;
@@ -66,7 +76,7 @@ export function renderStreetTile(
 
   // White stop lines
   const hw2 = 4;
-  if (inStreetCol && rowMod === 10 && colMod >= 5) {
+  if (inStreetCol && rowMod === stopNear && colMod >= centerCol + 1) {
     streetLines.fillStyle(0xffffff, 0.4);
     streetLines.fillPoints([
       new Phaser.Geom.Point(x - tw / 4 - hw2, y - th / 4 + hw2 * 0.5),
@@ -75,7 +85,7 @@ export function renderStreetTile(
       new Phaser.Geom.Point(x + tw / 4 - hw2, y + th / 4 + hw2 * 0.5),
     ], true);
   }
-  if (inStreetCol && rowMod === 37 && colMod <= 3) {
+  if (inStreetCol && rowMod === stopFarRow && colMod <= centerCol - 1) {
     streetLines.fillStyle(0xffffff, 0.4);
     streetLines.fillPoints([
       new Phaser.Geom.Point(x - tw / 4 - hw2, y - th / 4 + hw2 * 0.5),
@@ -84,7 +94,7 @@ export function renderStreetTile(
       new Phaser.Geom.Point(x + tw / 4 - hw2, y + th / 4 + hw2 * 0.5),
     ], true);
   }
-  if (inStreetRow && colMod === 10 && rowMod <= 3) {
+  if (inStreetRow && colMod === stopNear && rowMod <= centerCol - 1) {
     streetLines.fillStyle(0xffffff, 0.4);
     streetLines.fillPoints([
       new Phaser.Geom.Point(x + tw / 4 - hw2, y - th / 4 - hw2 * 0.5),
@@ -93,7 +103,7 @@ export function renderStreetTile(
       new Phaser.Geom.Point(x - tw / 4 - hw2, y + th / 4 - hw2 * 0.5),
     ], true);
   }
-  if (inStreetRow && colMod === 21 && rowMod >= 5) {
+  if (inStreetRow && colMod === stopFarCol && rowMod >= centerCol + 1) {
     streetLines.fillStyle(0xffffff, 0.4);
     streetLines.fillPoints([
       new Phaser.Geom.Point(x + tw / 4 - hw2, y - th / 4 - hw2 * 0.5),
@@ -105,7 +115,7 @@ export function renderStreetTile(
 
   // Crosswalks
   const hw = 3;
-  if (inStreetCol && (rowMod === 8 || rowMod === 9 || rowMod === 38 || rowMod === 39)) {
+  if (inStreetCol && (rowMod === cwNear || rowMod === cwNearEnd || rowMod === cwFarRow || rowMod === cwFarRowEnd)) {
     streetLines.fillStyle(0xffffff, 0.35);
     streetLines.fillPoints([
       new Phaser.Geom.Point(x + tw / 4 - hw, y - th / 4 - hw * 0.5),
@@ -114,7 +124,7 @@ export function renderStreetTile(
       new Phaser.Geom.Point(x - tw / 4 - hw, y + th / 4 - hw * 0.5),
     ], true);
   }
-  if (inStreetRow && (colMod === 8 || colMod === 9 || colMod === 22 || colMod === 23)) {
+  if (inStreetRow && (colMod === cwNear || colMod === cwNearEnd || colMod === cwFarCol || colMod === cwFarColEnd)) {
     streetLines.fillStyle(0xffffff, 0.35);
     streetLines.fillPoints([
       new Phaser.Geom.Point(x - tw / 4 + hw, y - th / 4 - hw * 0.5),
@@ -139,10 +149,7 @@ export function renderSidewalkTile(
   const th = TILE_H;
   const { x: sx, y: sy } = isoToScreen(col, row);
 
-  // Textured top face (raised by curb height)
-  scene.add.image(sx, sy - CURB_HEIGHT, "sidewalk").setDepth(0.6);
-
-  // Curb walls
+  // Curb walls (top face image handled by blitter in drawCityMap)
   const colors = TILE_COLORS[TileType.SIDEWALK];
   sidewalkGfx.fillStyle(colors.left, 1);
   sidewalkGfx.fillPoints([

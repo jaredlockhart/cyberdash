@@ -1,18 +1,19 @@
 // City grid constants and helpers
 
-export const COL_PERIOD = 24;
-export const ROW_PERIOD = 40;
 export const STREET_WIDTH = 8;
+export const SIDEWALK_WIDTH = 4;
+export const COL_PERIOD = 36;
+export const ROW_PERIOD = 56;
 export const STORY_HEIGHT = 128;
 export const CURB_HEIGHT = 6;
 
 export const BLOCK_INTERIOR = {
-  colStart: 10,
-  colEnd: 21,
-  cols: 12,
-  rowStart: 10,
-  rowEnd: 37,
-  rows: 28,
+  colStart: STREET_WIDTH + SIDEWALK_WIDTH,       // 12
+  colEnd: COL_PERIOD - SIDEWALK_WIDTH - 1,       // 31
+  cols: COL_PERIOD - STREET_WIDTH - SIDEWALK_WIDTH * 2, // 20
+  rowStart: STREET_WIDTH + SIDEWALK_WIDTH,       // 12
+  rowEnd: ROW_PERIOD - SIDEWALK_WIDTH - 1,       // 51
+  rows: ROW_PERIOD - STREET_WIDTH - SIDEWALK_WIDTH * 2, // 40
 } as const;
 
 export enum TileType {

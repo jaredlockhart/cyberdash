@@ -1,6 +1,6 @@
 import Phaser from "phaser";
 import { TILE_W, TILE_H, isoToScreen, screenToIso } from "../iso/IsoGeometry";
-import { COL_PERIOD, ROW_PERIOD, BLOCK_INTERIOR, TileType, CURB_HEIGHT } from "../iso/CityLayout";
+import { COL_PERIOD, ROW_PERIOD, STREET_WIDTH, SIDEWALK_WIDTH, BLOCK_INTERIOR, TileType, CURB_HEIGHT } from "../iso/CityLayout";
 import { Building, BUILDING_PALETTE } from "../rendering/BuildingTypes";
 import { renderBuilding } from "../rendering/BuildingRenderer";
 import { renderStreetTile, renderSidewalkTile } from "../rendering/StreetRenderer";
@@ -24,9 +24,9 @@ export class GameScene extends Phaser.Scene {
   private buildings: Building[] = [];
   private buildingObjects: {
     data: Building;
-    blockCol: number; blockRow: number;
     objects: Phaser.GameObjects.GameObject[];
   }[] = [];
+  private fpsText!: Phaser.GameObjects.Text;
 
   // Walk tuning
   private walkSpeed = 160;
@@ -39,8 +39,8 @@ export class GameScene extends Phaser.Scene {
   private runDrag = 2000;
 
   // Map settings
-  private readonly mapCols = 72;
-  private readonly mapRows = 88;
+  private readonly mapCols = 108;
+  private readonly mapRows = 168;
 
   constructor() {
     super({ key: "GameScene" });
@@ -50,11 +50,17 @@ export class GameScene extends Phaser.Scene {
     this.cityMap = this.generateCityMap();
     this.drawCityMap();
 
-    // Building collision bodies
+    // Building collision bodies — perimeter only (interior unreachable)
     const walls = this.physics.add.staticGroup();
     for (let row = 0; row < this.mapRows; row++) {
       for (let col = 0; col < this.mapCols; col++) {
         if (this.cityMap[row][col] === TileType.BUILDING) {
+          const colMod = col % COL_PERIOD;
+          const rowMod = row % ROW_PERIOD;
+          const isEdge =
+            colMod === BLOCK_INTERIOR.colStart || colMod === BLOCK_INTERIOR.colEnd ||
+            rowMod === BLOCK_INTERIOR.rowStart || rowMod === BLOCK_INTERIOR.rowEnd;
+          if (!isEdge) continue;
           const { x, y } = isoToScreen(col, row);
           const zone = this.add.zone(x, y, TILE_W * 0.45, TILE_H * 0.45);
           this.physics.add.existing(zone, true);
@@ -130,11 +136,19 @@ export class GameScene extends Phaser.Scene {
     compassLabel("SW", -cLen - 8, cLen / 2 + 6);
     compassLabel("N", 0, -cLen / 2 - 10);
 
+    this.fpsText = this.add.text(8, 8, "", {
+      fontFamily: "Arial, Helvetica, sans-serif",
+      fontSize: "10px",
+      color: "#555555",
+    }).setResolution(dpr).setScrollFactor(0).setDepth(1000);
+
     this.cursors = this.input.keyboard!.createCursorKeys();
     this.shiftKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.SHIFT);
   }
 
   update() {
+    this.fpsText.setText(`${Math.round(this.game.loop.actualFps)} fps`);
+
     const body = this.player.body as Phaser.Physics.Arcade.Body;
     const running = this.shiftKey.isDown;
 
@@ -189,21 +203,9 @@ export class GameScene extends Phaser.Scene {
     const playerDepth = feetY / (TILE_H / 2);
     this.player.setDepth(playerDepth);
 
-    // Hide building chunks when player is behind them
+    // Hide buildings that obstruct the player
     const { col: pCol, row: pRow } = screenToIso(this.player.x, feetY);
     const margin = 16;
-
-    const pColInt = Math.floor(pCol);
-    const pRowInt = Math.floor(pRow);
-    const inBounds = pColInt >= 0 && pColInt < this.mapCols && pRowInt >= 0 && pRowInt < this.mapRows;
-    const onStreet = inBounds && this.cityMap[pRowInt][pColInt] !== TileType.BUILDING;
-
-    const colMod = ((pColInt % COL_PERIOD) + COL_PERIOD) % COL_PERIOD;
-    const rowMod = ((pRowInt % ROW_PERIOD) + ROW_PERIOD) % ROW_PERIOD;
-    const playerBlockCol = Math.floor(pCol / COL_PERIOD);
-    const playerBlockRow = Math.floor(pRow / ROW_PERIOD);
-    const seBlockCol = colMod >= 22 ? playerBlockCol + 1 : playerBlockCol;
-    const seBlockRow = rowMod >= 38 ? playerBlockRow + 1 : playerBlockRow;
 
     for (const entry of this.buildingObjects) {
       const b = entry.data;
@@ -212,11 +214,7 @@ export class GameScene extends Phaser.Scene {
       const behind = pCol + pRow < nearestCol + nearestRow;
       const withinCol = pCol >= b.colStart - margin && pCol <= b.colEnd;
       const withinRow = pRow >= b.rowStart - margin && pRow <= b.rowEnd;
-      const hideBehind = behind && withinCol && withinRow;
-
-      const isSEBlock = onStreet && entry.blockCol === seBlockCol && entry.blockRow === seBlockRow;
-
-      const hide = hideBehind || isSEBlock;
+      const hide = behind && withinCol && withinRow;
 
       for (const obj of entry.objects) {
         (obj as Phaser.GameObjects.Graphics).setVisible(!hide);
@@ -244,14 +242,14 @@ export class GameScene extends Phaser.Scene {
       for (let col = 0; col < this.mapCols; col++) {
         const colMod = col % COL_PERIOD;
         const rowMod = row % ROW_PERIOD;
-        const inStreetCol = colMod < 8;
-        const inStreetRow = rowMod < 8;
+        const inStreetCol = colMod < STREET_WIDTH;
+        const inStreetRow = rowMod < STREET_WIDTH;
 
         if (inStreetCol || inStreetRow) {
           map[row][col] = TileType.STREET;
         } else {
-          const colEdge = colMod <= 9 || colMod >= 22;
-          const rowEdge = rowMod <= 9 || rowMod >= 38;
+          const colEdge = colMod < BLOCK_INTERIOR.colStart || colMod > BLOCK_INTERIOR.colEnd;
+          const rowEdge = rowMod < BLOCK_INTERIOR.rowStart || rowMod > BLOCK_INTERIOR.rowEnd;
 
           if (colEdge || rowEdge) {
             map[row][col] = TileType.SIDEWALK;
@@ -298,7 +296,7 @@ export class GameScene extends Phaser.Scene {
           const stories = 2 + Math.floor(h(1) * 3);
           const color = BUILDING_PALETTE[Math.floor(h(2) * BUILDING_PALETTE.length)];
           const texture = Math.floor(h(3) * 6);
-          const inset = 0.2 + h(4) * 0.6;
+          const inset = 0.1 + h(4) * 0.3;
           const heightOffset = Math.floor(h(5) * 60);
           const doorSide = h(6) < 0.5 ? "left" as const : "right" as const;
           const doorInset = 10 + Math.floor(h(7) * 30);
@@ -331,8 +329,8 @@ export class GameScene extends Phaser.Scene {
     let i = 0;
 
     while (remaining > 0) {
-      if (remaining <= 9) {
-        if (remaining >= 5) {
+      if (remaining <= 16) {
+        if (remaining >= 8) {
           depths.push(remaining);
         } else {
           depths[depths.length - 1] += remaining;
@@ -340,8 +338,8 @@ export class GameScene extends Phaser.Scene {
         break;
       }
 
-      const maxDepth = Math.min(9, remaining - 5);
-      const minDepth = 5;
+      const maxDepth = Math.min(16, remaining - 8);
+      const minDepth = 8;
       const depth = minDepth + Math.floor(this.hash(bCol * 100 + i, bRow, 99) * (maxDepth - minDepth + 1));
       depths.push(depth);
       remaining -= depth;
@@ -359,6 +357,10 @@ export class GameScene extends Phaser.Scene {
     const streetLines = this.add.graphics();
     streetLines.setDepth(0.5);
 
+    // Batch ground tile images into blitters (single draw call each)
+    const streetBlitter = this.add.blitter(0, 0, "street").setDepth(0);
+    const sidewalkBlitter = this.add.blitter(0, 0, "sidewalk").setDepth(0.6);
+
     for (let row = 0; row < this.mapRows; row++) {
       for (let col = 0; col < this.mapCols; col++) {
         const tile = this.cityMap[row][col];
@@ -366,12 +368,16 @@ export class GameScene extends Phaser.Scene {
         if (tile === TileType.BUILDING) {
           // Sidewalk ground under buildings (visible through inset gaps)
           const { x, y } = isoToScreen(col, row);
-          this.add.image(x, y - CURB_HEIGHT, "sidewalk").setDepth(0.6);
+          sidewalkBlitter.create(x - TILE_W / 2, y - CURB_HEIGHT - TILE_H / 2);
 
         } else if (tile === TileType.STREET) {
+          const { x, y } = isoToScreen(col, row);
+          streetBlitter.create(x - TILE_W / 2, y - TILE_H / 2);
           renderStreetTile(this, col, row, streetLines);
 
         } else if (tile === TileType.SIDEWALK) {
+          const { x, y } = isoToScreen(col, row);
+          sidewalkBlitter.create(x - TILE_W / 2, y - CURB_HEIGHT - TILE_H / 2);
           renderSidewalkTile(this, col, row, sidewalkGfx, sidewalkLines);
         }
       }
@@ -380,9 +386,7 @@ export class GameScene extends Phaser.Scene {
     // Render buildings as 3-shape parallelograms
     for (const building of this.buildings) {
       const objects = renderBuilding(this, building);
-      const blockCol = Math.floor(building.colStart / COL_PERIOD);
-      const blockRow = Math.floor(building.rowStart / ROW_PERIOD);
-      this.buildingObjects.push({ data: building, blockCol, blockRow, objects });
+      this.buildingObjects.push({ data: building, objects });
     }
   }
 }

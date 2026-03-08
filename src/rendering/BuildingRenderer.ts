@@ -131,16 +131,6 @@ export function renderBuilding(
     objects.push(img);
   }
 
-  // Roof textures (top-face images across entire footprint)
-  for (let row = building.rowStart; row <= building.rowEnd; row++) {
-    for (let col = building.colStart; col <= building.colEnd; col++) {
-      const pos = tileInsetPosition(building, col, row);
-      const img = scene.add.image(pos.x, pos.y - wallHeight, `bldg-top-v${v}`);
-      img.setDepth(depth + 0.12).setTint(building.color.top);
-      objects.push(img);
-    }
-  }
-
   // Door image on SE wall — depth must be above the closest-to-camera wall tile it overlaps
   const doorNearRow = Math.min(building.rowEnd,
     Math.floor(building.rowEnd - (doorAlong - TILE_W) / (TILE_W / 2)));

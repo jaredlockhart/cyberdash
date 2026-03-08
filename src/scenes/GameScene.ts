@@ -360,6 +360,8 @@ export class GameScene extends Phaser.Scene {
   private drawCityMap(map: number[][]) {
     const ground = this.add.graphics();
     ground.setDepth(0);
+    const streetLines = this.add.graphics();
+    streetLines.setDepth(0.5);
 
     // Group building tiles into small chunks for clean rectangular occlusion
     const chunkSize = 6;
@@ -391,6 +393,108 @@ export class GameScene extends Phaser.Scene {
           const x = (col - row) * (this.tileWidth / 2);
           const y = (col + row) * (this.tileHeight / 2);
           this.add.image(x, y, "street").setDepth(0);
+
+          const colMod = col % COL_PERIOD;
+          const rowMod = row % ROW_PERIOD;
+          const inStreetCol = colMod < 8;
+          const inStreetRow = rowMod < 8;
+          const isIntersection = inStreetCol && inStreetRow;
+
+          if (!isIntersection) {
+            const tw = this.tileWidth;
+            const th = this.tileHeight;
+
+            // Double yellow center lines on streets
+            const isCenter = inStreetCol ? colMod === 4 : rowMod === 4;
+
+            // Skip yellow lines near crosswalks
+            const nearCrosswalk = inStreetCol
+              ? (rowMod >= 7 && rowMod <= 10) || (rowMod >= 37 && rowMod <= 39)
+              : (colMod >= 7 && colMod <= 10) || (colMod >= 21 && colMod <= 23);
+
+            if (isCenter && !nearCrosswalk) {
+              const off = 3; // half-gap between the two lines
+              streetLines.lineStyle(2, 0x8b8520, 0.5);
+              if (inStreetCol) {
+                // Two parallel NW-SE lines offset along NE-SW axis
+                streetLines.lineBetween(x + 17 - off, y - 8 - off * 0.5, x - 17 - off, y + 8 - off * 0.5);
+                streetLines.lineBetween(x + 17 + off, y - 8 + off * 0.5, x - 17 + off, y + 8 + off * 0.5);
+              } else {
+                // Two parallel NE-SW lines offset along NW-SE axis
+                streetLines.lineBetween(x - 17 + off, y - 8 - off * 0.5, x + 17 + off, y + 8 - off * 0.5);
+                streetLines.lineBetween(x - 17 - off, y - 8 + off * 0.5, x + 17 - off, y + 8 + off * 0.5);
+              }
+            }
+
+            // White stop lines — only on the approaching traffic's side of the center line
+            const hw2 = 4;
+            // Col-streets: center line at colMod 4
+            // rowMod 10 (approaching from SE going NW): right lane = colMod 0-3
+            // rowMod 37 (approaching from NW going SE): right lane = colMod 5-7
+            if (inStreetCol && rowMod === 10 && colMod >= 5) {
+              streetLines.fillStyle(0xffffff, 0.4);
+              streetLines.fillPoints([
+                new Phaser.Geom.Point(x - tw / 4 - hw2, y - th / 4 + hw2 * 0.5),
+                new Phaser.Geom.Point(x - tw / 4 + hw2, y - th / 4 - hw2 * 0.5),
+                new Phaser.Geom.Point(x + tw / 4 + hw2, y + th / 4 - hw2 * 0.5),
+                new Phaser.Geom.Point(x + tw / 4 - hw2, y + th / 4 + hw2 * 0.5),
+              ], true);
+            }
+            if (inStreetCol && rowMod === 37 && colMod <= 3) {
+              streetLines.fillStyle(0xffffff, 0.4);
+              streetLines.fillPoints([
+                new Phaser.Geom.Point(x - tw / 4 - hw2, y - th / 4 + hw2 * 0.5),
+                new Phaser.Geom.Point(x - tw / 4 + hw2, y - th / 4 - hw2 * 0.5),
+                new Phaser.Geom.Point(x + tw / 4 + hw2, y + th / 4 - hw2 * 0.5),
+                new Phaser.Geom.Point(x + tw / 4 - hw2, y + th / 4 + hw2 * 0.5),
+              ], true);
+            }
+            // Row-streets: center line at rowMod 4
+            // colMod 10 (approaching from NE going SW): right lane = rowMod 5-7
+            // colMod 21 (approaching from SW going NE): right lane = rowMod 0-3
+            if (inStreetRow && colMod === 10 && rowMod <= 3) {
+              streetLines.fillStyle(0xffffff, 0.4);
+              streetLines.fillPoints([
+                new Phaser.Geom.Point(x + tw / 4 - hw2, y - th / 4 - hw2 * 0.5),
+                new Phaser.Geom.Point(x + tw / 4 + hw2, y - th / 4 + hw2 * 0.5),
+                new Phaser.Geom.Point(x - tw / 4 + hw2, y + th / 4 + hw2 * 0.5),
+                new Phaser.Geom.Point(x - tw / 4 - hw2, y + th / 4 - hw2 * 0.5),
+              ], true);
+            }
+            if (inStreetRow && colMod === 21 && rowMod >= 5) {
+              streetLines.fillStyle(0xffffff, 0.4);
+              streetLines.fillPoints([
+                new Phaser.Geom.Point(x + tw / 4 - hw2, y - th / 4 - hw2 * 0.5),
+                new Phaser.Geom.Point(x + tw / 4 + hw2, y - th / 4 + hw2 * 0.5),
+                new Phaser.Geom.Point(x - tw / 4 + hw2, y + th / 4 + hw2 * 0.5),
+                new Phaser.Geom.Point(x - tw / 4 - hw2, y + th / 4 - hw2 * 0.5),
+              ], true);
+            }
+
+            // Crosswalks: white bars on street tiles adjacent to sidewalks
+            // Col-street crosswalks at rowMod 8-9 and 38-39 (next to sidewalks)
+            const hw = 3; // bar half-width
+            // Col-street crosswalks at rowMod 8-9 and 38-39
+            if (inStreetCol && (rowMod === 8 || rowMod === 9 || rowMod === 38 || rowMod === 39)) {
+              streetLines.fillStyle(0xffffff, 0.35);
+              streetLines.fillPoints([
+                new Phaser.Geom.Point(x + tw / 4 - hw, y - th / 4 - hw * 0.5),
+                new Phaser.Geom.Point(x + tw / 4 + hw, y - th / 4 + hw * 0.5),
+                new Phaser.Geom.Point(x - tw / 4 + hw, y + th / 4 + hw * 0.5),
+                new Phaser.Geom.Point(x - tw / 4 - hw, y + th / 4 - hw * 0.5),
+              ], true);
+            }
+            // Row-street crosswalks at colMod 8-9 and 22-23
+            if (inStreetRow && (colMod === 8 || colMod === 9 || colMod === 22 || colMod === 23)) {
+              streetLines.fillStyle(0xffffff, 0.35);
+              streetLines.fillPoints([
+                new Phaser.Geom.Point(x - tw / 4 + hw, y - th / 4 - hw * 0.5),
+                new Phaser.Geom.Point(x - tw / 4 - hw, y - th / 4 + hw * 0.5),
+                new Phaser.Geom.Point(x + tw / 4 - hw, y + th / 4 + hw * 0.5),
+                new Phaser.Geom.Point(x + tw / 4 + hw, y + th / 4 - hw * 0.5),
+              ], true);
+            }
+          }
         } else {
           this.drawTile(ground, col, row, tile);
         }

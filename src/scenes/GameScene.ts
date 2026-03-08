@@ -32,6 +32,8 @@ interface BuildingTile {
   stories: number;
   color: { top: number; left: number; right: number };
   texture: number; // 0-5, indexes into texture variants
+  inset: number; // fractional tile inset from sidewalk (0.2-0.8)
+  heightOffset: number; // random pixel offset added to base story height
 }
 
 // Dark cyberpunk color palette — base hues with consistent lighting
@@ -85,7 +87,7 @@ export class GameScene extends Phaser.Scene {
     this.cityMap = this.generateCityMap();
     this.drawCityMap(this.cityMap);
 
-    // Building collision bodies
+    // Building collision bodies (only where buildingData exists, not inset gaps)
     const walls = this.physics.add.staticGroup();
     for (let row = 0; row < this.mapRows; row++) {
       for (let col = 0; col < this.mapCols; col++) {
@@ -341,12 +343,14 @@ export class GameScene extends Phaser.Scene {
           const stories = 2 + Math.floor(Math.random() * 3);
           const color = BUILDING_PALETTE[Math.floor(Math.random() * BUILDING_PALETTE.length)];
           const texture = Math.floor(Math.random() * 6);
+          const inset = 0.2 + Math.random() * 0.6; // fractional tile inset (0.2-0.8)
+          const heightOffset = Math.floor(Math.random() * 60); // 0 to 60 pixels taller
 
           // Fill all tiles for this building (full col width, varying row depth)
           for (let r = baseRow + rowOffset; r < baseRow + rowOffset + depth; r++) {
             for (let c = baseCol; c <= bCol * COL_PERIOD + blockInteriorColEnd; c++) {
               if (r < this.mapRows && c < this.mapCols && map[r][c] === BUILDING) {
-                this.buildingData[r][c] = { stories, color, texture };
+                this.buildingData[r][c] = { stories, color, texture, inset, heightOffset };
               }
             }
           }
@@ -403,23 +407,40 @@ export class GameScene extends Phaser.Scene {
           const bData = this.buildingData[row][col];
           const tileObjects: Phaser.GameObjects.GameObject[] = [];
 
+          // Sidewalk ground under building (visible through inset gaps)
+          const gx = (col - row) * (this.tileWidth / 2);
+          const gy = (col + row) * (this.tileHeight / 2);
+          this.add.image(gx, gy - CURB_HEIGHT, "sidewalk").setDepth(0.6);
+
           if (bData) {
             const tw = this.tileWidth;
             const th = this.tileHeight;
-            const bx = (col - row) * (tw / 2);
-            const by = (col + row) * (th / 2);
-            const tileDepth = bData.stories * STORY_HEIGHT;
+
+            // Col-axis inset: compress building toward block center
+            const relCol = (col % COL_PERIOD) - 10; // 0-11 within block
+            const t = relCol / 11;
+            const dc = bData.inset * (1 - 2 * t); // +inset at NW edge, -inset at SE edge
+            const ox = dc * (tw / 2);
+            const oy = dc * (th / 2);
+
+            const bx = (col - row) * (tw / 2) + ox;
+            const by = (col + row) * (th / 2) + oy;
+            const tileDepth = bData.stories * STORY_HEIGHT + bData.heightOffset;
             const depth = col + row;
             const v = bData.texture;
 
+            // Scale walls to reach ground when heightOffset stretches them
+            const wallImgHeight = 16 + bData.stories * STORY_HEIGHT;
+            const scaleY = (tileDepth + 16) / wallImgHeight;
+
             // Left wall
             const leftImg = this.add.image(bx - tw / 2, by - tileDepth, `wall-left-v${v}-${bData.stories}s`);
-            leftImg.setOrigin(0, 0).setDepth(depth).setTint(bData.color.left);
+            leftImg.setOrigin(0, 0).setDepth(depth).setTint(bData.color.left).setScale(1, scaleY);
             tileObjects.push(leftImg);
 
             // Right wall
             const rightImg = this.add.image(bx, by - tileDepth, `wall-right-v${v}-${bData.stories}s`);
-            rightImg.setOrigin(0, 0).setDepth(depth).setTint(bData.color.right);
+            rightImg.setOrigin(0, 0).setDepth(depth).setTint(bData.color.right).setScale(1, scaleY);
             tileObjects.push(rightImg);
 
             // Top face

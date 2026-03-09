@@ -400,16 +400,24 @@ export class GameScene extends Phaser.Scene {
   private drawShowroom() {
     const dpr = window.devicePixelRatio || 1;
 
-    const NUM_DOORS = 6;
-    const NUM_DOOR_CANDIDATES = 10;
-    const NUM_WINDOWS = 12;
+    // Asset counts
+    const sections = [
+      { label: "DOORS", prefix: "door", count: 6 },
+      { label: "DOOR CAND.", prefix: "door-candidate", count: 10 },
+      { label: "WINDOWS", prefix: "window", count: 12 },
+      { label: "BARRED WIN", prefix: "barred-window", count: 14 },
+      { label: "GLASS WIN", prefix: "glass-window", count: 6 },
+      { label: "METAL DOOR", prefix: "metal-door", count: 14 },
+      { label: "GLASS DOOR", prefix: "glass-door", count: 6 },
+      { label: "BARRED DOOR", prefix: "barred-door", count: 9 },
+      { label: "GLASS BAR DOOR", prefix: "glass-barred-door", count: 9 },
+    ];
+    const TOTAL = sections.reduce((s, sec) => s + sec.count, 0);
 
-    const TOTAL = NUM_DOORS + NUM_DOOR_CANDIDATES + NUM_WINDOWS;
-
-    // Big SE-facing wall at NW corner: col=1, rows 1..90
+    // Big SE-facing wall at NW corner
     const wallCol = 1;
     const rStart = 1;
-    const rEnd = 150;
+    const rEnd = 350;
     const wallHeight = 350;
 
     const E = isoToScreen(wallCol, rStart);
@@ -458,35 +466,22 @@ export class GameScene extends Phaser.Scene {
 
     let slot = 0;
 
-    // Existing doors (D0-D5)
-    for (let i = 0; i < NUM_DOORS; i++) {
-      placeAsset(slot++, `door-${i}`, `D${i}`, 180);
-    }
+    for (const sec of sections) {
+      const startSlot = slot;
+      for (let i = 0; i < sec.count; i++) {
+        const shortLabel = sec.prefix.charAt(0).toUpperCase() + i;
+        placeAsset(slot++, `${sec.prefix}-${i}`, shortLabel, 180);
+      }
 
-    // New door candidates (ND0-ND9)
-    for (let i = 0; i < NUM_DOOR_CANDIDATES; i++) {
-      placeAsset(slot++, `door-candidate-${i}`, `ND${i}`, 180);
-    }
-
-    // Active windows (W0-W11)
-    for (let i = 0; i < NUM_WINDOWS; i++) {
-      placeAsset(slot++, `window-${i}`, `W${i}`, 180);
-    }
-
-    // Section labels along the top of the wall
-    const sectionLabel = (text: string, startSlot: number, endSlot: number) => {
-      const t = margin + slotWidth * ((startSlot + endSlot) / 2 + 0.5);
+      // Section label along top of wall
+      const t = margin + slotWidth * ((startSlot + slot - 1) / 2 + 0.5);
       const lx = S.x + t * (E.x - S.x);
       const ly = S.y + t * (E.y - S.y) - wallHeight + 20;
-      this.add.text(lx, ly, text, {
+      this.add.text(lx, ly, sec.label, {
         fontFamily: "Arial, Helvetica, sans-serif",
         fontSize: "12px",
         color: "#00ffff",
       }).setOrigin(0.5).setResolution(dpr).setDepth(wallDepth + 0.2);
-    };
-
-    sectionLabel("DOORS (current)", 0, NUM_DOORS - 1);
-    sectionLabel("DOORS (new)", NUM_DOORS, NUM_DOORS + NUM_DOOR_CANDIDATES - 1);
-    sectionLabel("WINDOWS", NUM_DOORS + NUM_DOOR_CANDIDATES, TOTAL - 1);
+    }
   }
 }

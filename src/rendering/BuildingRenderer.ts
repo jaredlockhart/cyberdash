@@ -2,7 +2,7 @@ import Phaser from "phaser";
 import { TILE_W, TILE_H } from "../iso/IsoGeometry";
 import { STORY_HEIGHT } from "../iso/CityLayout";
 import { Building } from "./BuildingTypes";
-import { buildingCorners, tileInsetPosition, computeBuildingMetrics, WIN_MAX_SCALE, WIN_GAP, WIN_DOOR_GAP, WIN_WALL_MARGIN, WIN_BOTTOM, WIN_MIN_ZONE } from "./BuildingMetrics";
+import { buildingCorners, tileInsetPosition, computeBuildingMetrics, SLOT_WIDTH, SLOT_GAP, WALL_MARGIN, WIN_TARGET_H, WIN_BOTTOM } from "./BuildingMetrics";
 export type { BuildingMetrics } from "./BuildingMetrics";
 export { computeBuildingMetrics } from "./BuildingMetrics";
 
@@ -101,17 +101,27 @@ export function renderBuilding(
   ], true);
   objects.push(swWallGfx);
 
-  // --- Door position (computed early so SE wall can skip overlapping tiles) ---
+  // --- Slot grid for SE wall features (doors & windows) ---
 
-  const doorWidth = 48;
   const seWallLen = E.x - S.x;
-  const doorMargin = building.doorInset;
-  const doorAlong = building.doorSide === "left" ? doorMargin : seWallLen - doorWidth - doorMargin;
-  const doorCenterAlong = doorAlong + doorWidth / 2;
+  const usableWidth = seWallLen - 2 * WALL_MARGIN;
+  const numSlots = Math.max(1, Math.floor((usableWidth + SLOT_GAP) / (SLOT_WIDTH + SLOT_GAP)));
+  const totalSlotsWidth = numSlots * SLOT_WIDTH + (numSlots - 1) * SLOT_GAP;
+  const gridStart = WALL_MARGIN + (usableWidth - totalSlotsWidth) / 2;
+
+  // Door slot: leftmost or rightmost based on doorSide
+  const doorSlot = building.doorSide === "left" ? 0 : numSlots - 1;
+
+  // Compute slot center positions along the wall
+  const slotCenters: number[] = [];
+  for (let s = 0; s < numSlots; s++) {
+    slotCenters.push(gridStart + s * (SLOT_WIDTH + SLOT_GAP) + SLOT_WIDTH / 2);
+  }
+
+  const doorCenterAlong = slotCenters[doorSlot];
   const doorX = S.x + doorCenterAlong;
   const doorY = S.y - doorCenterAlong * 0.5 + TILE_H / 2;
-  const doorT = seWallLen > 0 ? doorCenterAlong / seWallLen : 0;
-  const doorRow = building.rowEnd + (building.rowStart - building.rowEnd) * doorT;
+  const doorAlong = doorCenterAlong - SLOT_WIDTH / 2;
 
   // --- Texture images with per-tile depth ---
 
@@ -134,57 +144,45 @@ export function renderBuilding(
     objects.push(img);
   }
 
-  // Door image on SE wall — depth from S-ward (camera-nearest) edge
+  // Door image on SE wall (ground floor, door slot)
   const doorNearT = seWallLen > 0 ? doorAlong / seWallLen : 0;
   const doorNearRow = building.rowEnd + (building.rowStart - building.rowEnd) * doorNearT;
   const doorImg = scene.add.image(doorX, doorY, `door-${building.doorTexture}`);
   doorImg.setOrigin(0.5, 1).setDepth(building.colEnd + Math.ceil(doorNearRow) + 0.5);
   objects.push(doorImg);
 
-  // --- Ground-floor storefront windows on SE wall ---
-  let windowStart: number;
-  let windowEnd: number;
+  // --- Windows on SE wall (grid-aligned, all floors, tops aligned with door top) ---
+  const texKey = `window-${building.windowTexture}`;
+  const probe = scene.textures.getFrame(texKey);
+  const texW = probe?.width ?? 128;
+  const texH = probe?.height ?? 128;
+  // Scale to fit: target height, but also don't exceed slot width
+  const winScale = Math.min(WIN_TARGET_H / texH, SLOT_WIDTH / texW);
 
-  if (building.doorSide === "left") {
-    windowStart = doorAlong + doorWidth + WIN_DOOR_GAP;
-    windowEnd = seWallLen - WIN_WALL_MARGIN;
-  } else {
-    windowStart = WIN_WALL_MARGIN;
-    windowEnd = doorAlong - WIN_DOOR_GAP;
-  }
+  // Door rendered height = 128 (native). Window top aligns with door top.
+  // Door bottom is at floorBaseY (= S.y - along*0.5 + TILE_H/2 for its slot).
+  // Door top = floorBaseY - 128. Window top should match.
+  const doorRenderedH = 128;
 
-  const windowZone = windowEnd - windowStart;
-  if (windowZone >= WIN_MIN_ZONE) {
-    const texKey = `window-${building.windowTexture}`;
-    // Probe texture size (creates a temporary image)
-    const probe = scene.textures.getFrame(texKey);
-    const texW = probe?.width ?? 128;
+  for (let floor = 0; floor < building.stories; floor++) {
+    const floorY = floor * STORY_HEIGHT;
 
-    // Single window width at max scale
-    const singleW = texW * WIN_MAX_SCALE;
-    // How many windows fit with gaps between them?
-    const count = Math.max(1, Math.floor((windowZone + WIN_GAP) / (singleW + WIN_GAP)));
-    // Actual scale: divide available space evenly (minus gaps), then cap
-    const perWinWidth = (windowZone - WIN_GAP * (count - 1)) / count;
-    const scale = Math.min(WIN_MAX_SCALE, perWinWidth / texW);
+    for (let s = 0; s < numSlots; s++) {
+      // Ground floor: skip the door slot
+      if (floor === 0 && s === doorSlot) continue;
 
-    const actualWinW = texW * scale;
-    // Total width of all windows + gaps
-    const totalW = actualWinW * count + WIN_GAP * (count - 1);
-    // Center the window group within the zone
-    const offsetStart = windowStart + (windowZone - totalW) / 2;
-
-    for (let i = 0; i < count; i++) {
-      const along = offsetStart + i * (actualWinW + WIN_GAP);
+      const along = slotCenters[s];
       const winX = S.x + along;
-      const winY = S.y - along * 0.5 - WIN_BOTTOM;
+      // Floor baseline at this slot position
+      const floorBaseY = S.y - along * 0.5 + TILE_H / 2 - floorY;
+      // Top of door (or where door top would be) at this floor
+      const topY = floorBaseY - doorRenderedH;
 
-      // Depth from S-ward (camera-nearest) edge of this window
-      const winNearT = seWallLen > 0 ? along / seWallLen : 0;
+      const winNearT = seWallLen > 0 ? (along - SLOT_WIDTH / 2) / seWallLen : 0;
       const winNearRow = building.rowEnd + (building.rowStart - building.rowEnd) * winNearT;
 
-      const winImg = scene.add.image(winX, winY, texKey);
-      winImg.setOrigin(0, 1).setScale(scale, scale);
+      const winImg = scene.add.image(winX, topY, texKey);
+      winImg.setOrigin(0.5, 0).setScale(winScale, winScale);
       winImg.setDepth(building.colEnd + Math.ceil(winNearRow) + 0.5);
       objects.push(winImg);
     }

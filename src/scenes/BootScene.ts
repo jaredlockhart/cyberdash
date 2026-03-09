@@ -42,6 +42,25 @@ export class BootScene extends Phaser.Scene {
     for (let c = 0; c < 10; c++) {
       this.load.image(`door-candidate-${c}`, `assets/sprites/door_candidate_${c}.png`);
     }
+    // New asset variants
+    for (let i = 0; i < 14; i++) {
+      this.load.image(`barred-window-${i}`, `assets/sprites/barred_window_${i}.png`);
+    }
+    for (let i = 0; i < 6; i++) {
+      this.load.image(`glass-window-${i}`, `assets/sprites/glass_window_${i}.png`);
+    }
+    for (let i = 0; i < 14; i++) {
+      this.load.image(`metal-door-${i}`, `assets/sprites/metal_door_${i}.png`);
+    }
+    for (let i = 0; i < 6; i++) {
+      this.load.image(`glass-door-${i}`, `assets/sprites/glass_door_${i}.png`);
+    }
+    for (let i = 0; i < 9; i++) {
+      this.load.image(`barred-door-${i}`, `assets/sprites/barred_door_${i}.png`);
+    }
+    for (let i = 0; i < 9; i++) {
+      this.load.image(`glass-barred-door-${i}`, `assets/sprites/glass_barred_door_${i}.png`);
+    }
     for (let v = 0; v < 6; v++) {
       this.load.image(`bldg-top-v${v}`, `assets/tilemaps/bldg_top_v${v}.png`);
       for (const s of [2, 3, 4]) {

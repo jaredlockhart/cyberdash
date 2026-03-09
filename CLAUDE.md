@@ -58,6 +58,12 @@ Key facts:
 - Use API params (view, detail, shading, outline) for style, NOT the description
 - PixelLab **cannot reliably generate iso-angled wall elements** — use Replicate instead
 
+## Rendering Sizes & Placement
+- **Always be intentional about rendered sizes and positions.** Never place an asset without explicitly choosing its rendered pixel dimensions and position. What matters is how things look in the game, not the source image size.
+- Source images are kept full-res on disk. The renderer computes a scale factor to hit the target rendered size.
+- **Standard rendered sizes**: Doors = 56x128px, Windows = 48x80px (target height, uniform scale)
+- Sizes and layout constants live in `src/rendering/BuildingMetrics.ts` — change them there, not ad-hoc in the renderer.
+
 ## Conventions
 - Use Phaser's scene system for game state management
 - Keep game config in `src/config/game.ts`

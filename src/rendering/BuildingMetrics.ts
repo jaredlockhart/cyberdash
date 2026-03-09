@@ -70,12 +70,13 @@ export interface BuildingMetrics {
 }
 
 // Layout constants — shared between renderer and metrics
-export const WIN_MAX_SCALE = 0.85;
-export const WIN_GAP = 12;
-export const WIN_DOOR_GAP = 20;
-export const WIN_WALL_MARGIN = 32;
-export const WIN_BOTTOM = 20;
-export const WIN_MIN_ZONE = 24;
+// SE wall is divided into a grid of equal-width slots.
+// Each slot holds a door (ground floor) or window. This ensures vertical alignment across floors.
+export const SLOT_WIDTH = 56;   // matches door rendered width
+export const SLOT_GAP = 12;     // gap between slots
+export const WALL_MARGIN = 32;  // margin from wall edges
+export const WIN_TARGET_H = 96; // target rendered height for windows
+export const WIN_BOTTOM = 30;   // vertical offset above floor baseline
 
 /**
  * Pure-math metrics computation. texSize callback returns {w, h} for a texture key.
@@ -92,35 +93,27 @@ export function computeBuildingMetrics(
     const { E, S } = buildingCorners(b);
     const wallHeight = b.stories * STORY_HEIGHT + b.heightOffset;
 
-    const doorWidth = 48;
     const seWallLen = E.x - S.x;
-    const doorAlong = b.doorSide === "left" ? b.doorInset : seWallLen - doorWidth - b.doorInset;
-
-    let windowStart: number;
-    let windowEnd: number;
-    if (b.doorSide === "left") {
-      windowStart = doorAlong + doorWidth + WIN_DOOR_GAP;
-      windowEnd = seWallLen - WIN_WALL_MARGIN;
-    } else {
-      windowStart = WIN_WALL_MARGIN;
-      windowEnd = doorAlong - WIN_DOOR_GAP;
-    }
-    const windowZone = windowEnd - windowStart;
+    const usableWidth = seWallLen - 2 * WALL_MARGIN;
+    const numSlots = Math.max(1, Math.floor((usableWidth + SLOT_GAP) / (SLOT_WIDTH + SLOT_GAP)));
+    const doorSlot = b.doorSide === "left" ? 0 : numSlots - 1;
+    const totalSlotsWidth = numSlots * SLOT_WIDTH + (numSlots - 1) * SLOT_GAP;
+    const gridStart = WALL_MARGIN + (usableWidth - totalSlotsWidth) / 2;
+    const doorAlong = gridStart + doorSlot * (SLOT_WIDTH + SLOT_GAP);
+    const windowZone = usableWidth;
 
     const door = texSize(`door-${b.doorTexture}`);
     const winIdx = b.windowTexture;
     const win = texSize(`window-${winIdx}`);
 
-    let winCount = 0;
+    // Ground floor window count = all slots minus door slot
+    let winCount = numSlots - 1;
     let winScale = 0;
     let winRenderedW = 0;
     let winRenderedH = 0;
 
-    if (win.w > 0 && windowZone >= WIN_MIN_ZONE) {
-      const singleW = win.w * WIN_MAX_SCALE;
-      winCount = Math.max(1, Math.floor((windowZone + WIN_GAP) / (singleW + WIN_GAP)));
-      const perWinWidth = (windowZone - WIN_GAP * (winCount - 1)) / winCount;
-      winScale = Math.min(WIN_MAX_SCALE, perWinWidth / win.w);
+    if (win.w > 0 && winCount > 0) {
+      winScale = Math.min(WIN_TARGET_H / win.h, SLOT_WIDTH / win.w);
       winRenderedW = Math.round(win.w * winScale);
       winRenderedH = Math.round(win.h * winScale);
     }

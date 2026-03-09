@@ -7,6 +7,7 @@ export interface TileColors {
 }
 
 export interface Building {
+  seed: number;        // deterministic seed derived from coordinates
   colStart: number;    // first col (absolute grid coords)
   colEnd: number;      // last col (inclusive)
   rowStart: number;    // first row
@@ -20,6 +21,14 @@ export interface Building {
   doorInset: number;   // pixels inset from wall edge
   doorTexture: number; // 0-2, door image variant
   windowTexture: number; // 0-5, window style variant (for future textures)
+}
+
+/** Hash a building seed with a salt to get a float in [0, 1). */
+export function buildingHash(seed: number, salt: number): number {
+  let h = (seed + salt * 668265263) | 0;
+  h = Math.imul(h ^ (h >>> 13), 1274126177);
+  h = h ^ (h >>> 16);
+  return (h >>> 0) / 0x100000000;
 }
 
 // Dark cyberpunk color palette — base hues with consistent lighting

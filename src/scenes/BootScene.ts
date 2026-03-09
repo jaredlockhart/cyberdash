@@ -71,6 +71,48 @@ export class BootScene extends Phaser.Scene {
     for (let i = 0; i < 6; i++) {
       this.load.image(`garbage-bin-${i}`, `assets/sprites/garbage_bin_${i}.png`);
     }
+    for (let i = 0; i < 9; i++) {
+      this.load.image(`vending-machine-${i}`, `assets/sprites/vending_machine_${i}.png`);
+    }
+    // Wall features (replace some windows)
+    for (let i = 0; i < 1; i++) {
+      this.load.image(`elec-box-${i}`, `assets/sprites/elec_box_${i}.png`);
+    }
+    for (let i = 0; i < 3; i++) {
+      this.load.image(`wall-vent-${i}`, `assets/sprites/wall_vent_${i}.png`);
+    }
+    for (let i = 0; i < 1; i++) {
+      this.load.image(`wall-pipe-${i}`, `assets/sprites/wall_pipe_${i}.png`);
+    }
+    // Street clutter
+    for (let i = 0; i < 10; i++) {
+      this.load.image(`garbage-${i}`, `assets/sprites/garbage_${i}.png`);
+    }
+    for (let i = 0; i < 10; i++) {
+      this.load.image(`debris-${i}`, `assets/sprites/debris_${i}.png`);
+    }
+    for (let i = 0; i < 10; i++) {
+      this.load.image(`boxes-${i}`, `assets/sprites/boxes_${i}.png`);
+    }
+    for (let i = 0; i < 10; i++) {
+      this.load.image(`scraps-${i}`, `assets/sprites/scraps_${i}.png`);
+    }
+    for (let i = 0; i < 9; i++) {
+      this.load.image(`garage-door-${i}`, `assets/sprites/garage_door_${i}.png`);
+    }
+    // Reprocessed props (no shear)
+    for (let i = 0; i < 10; i++) {
+      this.load.image(`fire-hydrant-${i}`, `assets/sprites/fire_hydrant_${i}.png`);
+    }
+    for (let i = 0; i < 10; i++) {
+      this.load.image(`street-lamp-${i}`, `assets/sprites/street_lamp_${i}.png`);
+    }
+    for (let i = 0; i < 10; i++) {
+      this.load.image(`steam-vent-${i}`, `assets/sprites/steam_vent_${i}.png`);
+    }
+    for (let i = 0; i < 10; i++) {
+      this.load.image(`dumpster-${i}`, `assets/sprites/dumpster_${i}.png`);
+    }
     for (let v = 0; v < 6; v++) {
       this.load.image(`bldg-top-v${v}`, `assets/tilemaps/bldg_top_v${v}.png`);
       for (const s of [2, 3, 4]) {

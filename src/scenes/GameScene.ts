@@ -27,6 +27,8 @@ export class GameScene extends Phaser.Scene {
     objects: Phaser.GameObjects.GameObject[];
   }[] = [];
   private fpsEl!: HTMLElement | null;
+  private glowOverlays: Phaser.GameObjects.Image[] = [];
+  private neonTexts: Phaser.GameObjects.Image[] = [];
 
   // Walk tuning
   private walkSpeed = 160;
@@ -169,6 +171,13 @@ export class GameScene extends Phaser.Scene {
         (obj as Phaser.GameObjects.Graphics).setVisible(!hide);
       }
     }
+
+    // Single sine pulse for all light sources
+    const t = 0.5 + 0.5 * Math.sin(this.time.now * Math.PI / 2000);
+    const glow = 0.55 * t;
+    for (const ov of this.glowOverlays) ov.setAlpha(glow);
+    const neonAlpha = 0.6 + 0.4 * t;
+    for (const img of this.neonTexts) img.setAlpha(neonAlpha);
   }
 
   private getDirection(dx: number, dy: number): Direction {
@@ -240,6 +249,11 @@ export class GameScene extends Phaser.Scene {
           const depth = depths[i];
           const rowStart = baseRow + rowOffset;
           const rowEnd = Math.min(baseRow + rowOffset + depth - 1, this.mapRows - 1);
+          // One seed per building, derived from coordinates
+          let seed = (baseCol * 374761393 + rowStart * 668265263) | 0;
+          seed = Math.imul(seed ^ (seed >>> 13), 1274126177);
+          seed = (seed ^ (seed >>> 16)) >>> 0;
+
           const h = (s: number) => this.hash(baseCol, rowStart, s);
 
           const stories = 2 + Math.floor(h(1) * 3);
@@ -253,6 +267,7 @@ export class GameScene extends Phaser.Scene {
           const windowTexture = Math.floor(h(9) * 12);
 
           this.buildings.push({
+            seed,
             colStart: baseCol,
             colEnd,
             rowStart,
@@ -338,6 +353,9 @@ export class GameScene extends Phaser.Scene {
     for (const building of this.buildings) {
       const objects = renderBuilding(this, building);
       this.buildingObjects.push({ data: building, objects });
+      for (const obj of objects) {
+        if ((obj as any).isNeonText) this.neonTexts.push(obj as Phaser.GameObjects.Image);
+      }
     }
 
     // Diagnostic: dump building/window/door metrics to console
@@ -349,11 +367,58 @@ export class GameScene extends Phaser.Scene {
     // Sewer grates scattered on streets
     this.placeSewerGrates();
 
-    // Garbage bins on sidewalks
-    this.placeGarbageBins();
+    // Steam vents on roads flush against sidewalk
+    this.placeSteamVents();
+
+    // Street lamps along sidewalks
+    this.placeStreetLamps();
+
+    // Clutter scattered on sidewalks
+    this.placeSidewalkClutter();
 
     // Asset showroom at NW corner
     this.drawShowroom();
+  }
+
+  /** Create a texture containing only bright or colorful pixels from the source.
+   *  luminance: keep pixels with luminance above this (for grey bright areas like lamp bulbs)
+   *  saturation: keep pixels with color saturation above this (for colored lights like traffic signals)
+   */
+  private createBrightMask(texKey: string, opts: { luminance?: number; saturation?: number }): string | null {
+    const suffix = `${opts.luminance ?? 'x'}-${opts.saturation ?? 'x'}`;
+    const maskKey = `${texKey}-bright-${suffix}`;
+    if (this.textures.exists(maskKey)) return maskKey;
+
+    const source = this.textures.get(texKey).getSourceImage() as HTMLImageElement;
+    if (!source || !source.width) return null;
+
+    const canvas = document.createElement('canvas');
+    canvas.width = source.width;
+    canvas.height = source.height;
+    const ctx = canvas.getContext('2d')!;
+    ctx.drawImage(source, 0, 0);
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const d = imageData.data;
+
+    for (let i = 0; i < d.length; i += 4) {
+      if (d[i + 3] < 128) { d[i + 3] = 0; continue; }
+      const r = d[i], g = d[i + 1], b = d[i + 2];
+      const lum = 0.299 * r + 0.587 * g + 0.114 * b;
+      const sat = Math.max(r, g, b) - Math.min(r, g, b);
+      const keepLum = opts.luminance !== undefined && lum >= opts.luminance;
+      const keepSat = opts.saturation !== undefined && sat >= opts.saturation;
+      if (!keepLum && !keepSat) {
+        d[i + 3] = 0;
+      }
+    }
+
+    ctx.putImageData(imageData, 0, 0);
+    // Count kept pixels for debugging
+    let kept = 0;
+    for (let i = 0; i < d.length; i += 4) { if (d[i + 3] > 0) kept++; }
+    console.log(`Bright mask "${maskKey}": ${kept} pixels kept (lum=${opts.luminance ?? '-'}, sat=${opts.saturation ?? '-'})`);
+    this.textures.addCanvas(maskKey, canvas);
+    return maskKey;
   }
 
   private placeTrafficLights() {
@@ -362,6 +427,7 @@ export class GameScene extends Phaser.Scene {
     const frame = this.textures.getFrame(texKey);
     if (!frame) return;
     const scale = TRAFFIC_LIGHT_H / frame.height;
+    const maskKey = this.createBrightMask(texKey, { saturation: 60 });
 
     const numBlockCols = Math.floor(this.mapCols / COL_PERIOD);
     const numBlockRows = Math.floor(this.mapRows / ROW_PERIOD);
@@ -393,6 +459,16 @@ export class GameScene extends Phaser.Scene {
           img.setOrigin(0.5, 1).setScale(scale);
           if (c.flip) img.setFlipX(true);
           img.setDepth(c.col + c.row + 0.5);
+          // DEBUG: bright mask overlay in magenta
+          if (maskKey) {
+            const overlay = this.add.image(pos.x, pos.y, maskKey);
+            overlay.setOrigin(0.5, 1).setScale(scale);
+            if (c.flip) overlay.setFlipX(true);
+            overlay.setDepth(c.col + c.row + 0.51);
+            overlay.setBlendMode(Phaser.BlendModes.ADD);
+            overlay.setAlpha(0);
+            this.glowOverlays.push(overlay);
+          }
         }
       }
     }
@@ -460,47 +536,147 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
-  private placeGarbageBins() {
-    const NUM_BINS = 6;
-    const BIN_H = 48; // rendered height in pixels
+  private placeSidewalkClutter() {
+    const types = [
+      { prefix: "boxes", count: 10, h: 40 },
+    ];
+    const CHANCE = 0.15; // ~15% of road-edge sidewalk tiles get clutter
+
+    for (let row = 0; row < this.mapRows; row++) {
+      for (let col = 0; col < this.mapCols; col++) {
+        if (this.cityMap[row][col] !== TileType.SIDEWALK) continue;
+        // Only on the sidewalk tile closest to the road
+        const colMod = col % COL_PERIOD;
+        const rowMod = row % ROW_PERIOD;
+        const onColEdge = colMod === STREET_WIDTH || colMod === COL_PERIOD - 1;
+        const onRowEdge = rowMod === STREET_WIDTH || rowMod === ROW_PERIOD - 1;
+        if (!onColEdge && !onRowEdge) continue;
+        // Skip corner zones (where both col and row are in the sidewalk band)
+        const colInSidewalk = colMod < BLOCK_INTERIOR.colStart || colMod > BLOCK_INTERIOR.colEnd;
+        const rowInSidewalk = rowMod < BLOCK_INTERIOR.rowStart || rowMod > BLOCK_INTERIOR.rowEnd;
+        if (colInSidewalk && rowInSidewalk) continue;
+        const h = this.hash(col, row, 300);
+        if (h >= CHANCE) continue;
+
+        const typeIdx = Math.floor(this.hash(col, row, 301) * types.length);
+        const type = types[typeIdx];
+        const variant = Math.floor(this.hash(col, row, 302) * type.count);
+        const texKey = `${type.prefix}-${variant}`;
+        const frame = this.textures.getFrame(texKey);
+        if (!frame) continue;
+
+        const scale = type.h / frame.height;
+        const pos = isoToScreen(col, row);
+        // Nudge inward (away from road) so clutter sits fully on sidewalk
+        let nx = 0, ny = 0;
+        if (colMod === STREET_WIDTH)      { nx += TILE_W / 4; ny += TILE_H / 4; }
+        if (colMod === COL_PERIOD - 1)    { nx -= TILE_W / 4; ny -= TILE_H / 4; }
+        if (rowMod === STREET_WIDTH)      { nx -= TILE_W / 4; ny += TILE_H / 4; }
+        if (rowMod === ROW_PERIOD - 1)    { nx += TILE_W / 4; ny -= TILE_H / 4; }
+        const img = this.add.image(pos.x + nx, pos.y + ny, texKey);
+        img.setOrigin(0.5, 1).setScale(scale).setDepth(col + row + 0.5);
+      }
+    }
+  }
+
+  private placeSteamVents() {
+    const VENT_H = 32;
+    const texKey = "steam-vent-0";
+    const frame = this.textures.getFrame(texKey);
+    if (!frame) return;
+    const scale = VENT_H / frame.height;
+
     const numBlockCols = Math.floor(this.mapCols / COL_PERIOD);
     const numBlockRows = Math.floor(this.mapRows / ROW_PERIOD);
 
-    // Sidewalk runs from STREET_WIDTH to BLOCK_INTERIOR.colStart (cols 8-11)
-    // and STREET_WIDTH to BLOCK_INTERIOR.rowStart (rows 8-11)
-    // Place one bin per block on the SE sidewalk edge and one on the SW sidewalk edge
+    // One vent per street segment, on the road flush against sidewalk, near the intersection
     for (let bRow = 0; bRow < numBlockRows; bRow++) {
       for (let bCol = 0; bCol < numBlockCols; bCol++) {
-        // SE sidewalk (along colEnd+1 edge, between rowStart and rowEnd)
-        const seCol = bCol * COL_PERIOD + BLOCK_INTERIOR.colEnd + 1;
-        const seRowStart = bRow * ROW_PERIOD + BLOCK_INTERIOR.rowStart;
-        const seRowEnd = bRow * ROW_PERIOD + BLOCK_INTERIOR.rowEnd;
-        const h1 = this.hash(bCol, bRow, 300);
-        const seRow = seRowStart + Math.floor(h1 * (seRowEnd - seRowStart));
-        const seTex = Math.floor(this.hash(bCol, bRow, 301) * NUM_BINS);
+        const baseCol = bCol * COL_PERIOD;
+        const baseRow = bRow * ROW_PERIOD;
 
-        const sePos = isoToScreen(seCol, seRow);
-        const seFrame = this.textures.getFrame(`garbage-bin-${seTex}`);
-        if (seFrame) {
-          const scale = BIN_H / seFrame.height;
-          const img = this.add.image(sePos.x, sePos.y, `garbage-bin-${seTex}`);
-          img.setOrigin(0.5, 1).setScale(scale).setDepth(seCol + seRow + 0.5);
+        // Horizontal street: flush against north sidewalk, a bit past intersection
+        const hCol = baseCol + STREET_WIDTH + 5;
+        const hRow = baseRow + STREET_WIDTH - 1;
+        if (hCol < this.mapCols && hRow < this.mapRows) {
+          const pos = isoToScreen(hCol, hRow);
+          const img = this.add.image(pos.x, pos.y, texKey);
+          img.setOrigin(0.5, 1).setScale(scale).setDepth(0.4);
         }
 
-        // SW sidewalk (along rowEnd+1 edge, between colStart and colEnd)
-        const swRow = bRow * ROW_PERIOD + BLOCK_INTERIOR.rowEnd + 1;
-        const swColStart = bCol * COL_PERIOD + BLOCK_INTERIOR.colStart;
-        const swColEnd = bCol * COL_PERIOD + BLOCK_INTERIOR.colEnd;
-        const h2 = this.hash(bCol, bRow, 310);
-        const swCol = swColStart + Math.floor(h2 * (swColEnd - swColStart));
-        const swTex = Math.floor(this.hash(bCol, bRow, 311) * NUM_BINS);
+        // Vertical street: flush against west sidewalk, a bit past intersection
+        const vCol = baseCol + STREET_WIDTH - 1;
+        const vRow = baseRow + STREET_WIDTH + 5;
+        if (vCol < this.mapCols && vRow < this.mapRows) {
+          const pos = isoToScreen(vCol, vRow);
+          const img = this.add.image(pos.x, pos.y, texKey);
+          img.setOrigin(0.5, 1).setScale(scale).setDepth(0.4);
+        }
+      }
+    }
+  }
 
-        const swPos = isoToScreen(swCol, swRow);
-        const swFrame = this.textures.getFrame(`garbage-bin-${swTex}`);
-        if (swFrame) {
-          const scale = BIN_H / swFrame.height;
-          const img = this.add.image(swPos.x, swPos.y, `garbage-bin-${swTex}`);
-          img.setOrigin(0.5, 1).setScale(scale).setDepth(swCol + swRow + 0.5);
+  private placeStreetLamps() {
+    const LAMP_H = 140;
+    const texKey = "street-lamp-1";
+    const frame = this.textures.getFrame(texKey);
+    if (!frame) return;
+    const scale = LAMP_H / frame.height;
+    const SPACING = 12;
+    const maskKey = this.createBrightMask(texKey, { luminance: 95 });
+
+    const numBlockCols = Math.floor(this.mapCols / COL_PERIOD);
+    const numBlockRows = Math.floor(this.mapRows / ROW_PERIOD);
+
+    for (let bRow = 0; bRow < numBlockRows; bRow++) {
+      for (let bCol = 0; bCol < numBlockCols; bCol++) {
+        const baseCol = bCol * COL_PERIOD;
+        const baseRow = bRow * ROW_PERIOD;
+
+        // Sidewalk outer edges (street-facing tiles)
+        const westCol = baseCol + STREET_WIDTH;         // colMod 8
+        const eastCol = baseCol + COL_PERIOD - 1;       // colMod 35
+        const northRow = baseRow + STREET_WIDTH;         // rowMod 8
+        const southRow = baseRow + ROW_PERIOD - 1;       // rowMod 55
+
+        const offset = Math.floor(SPACING / 2); // start offset to avoid traffic light corners
+
+        // Helper to place lamp + glow overlay
+        const placeLamp = (lx: number, ly: number, col: number, row: number) => {
+          const pos = isoToScreen(col, row);
+          const img = this.add.image(pos.x, pos.y, texKey);
+          img.setOrigin(0.5, 1).setScale(scale).setDepth(col + row + 0.5);
+          if (maskKey) {
+            const ov = this.add.image(pos.x, pos.y, maskKey);
+            ov.setOrigin(0.5, 1).setScale(scale).setDepth(col + row + 0.51);
+            ov.setBlendMode(Phaser.BlendModes.ADD);
+            ov.setAlpha(0);
+            this.glowOverlays.push(ov);
+          }
+        };
+
+        // West sidewalk: runs along rows
+        for (let row = northRow + offset; row <= southRow; row += SPACING) {
+          if (row >= this.mapRows) continue;
+          placeLamp(westCol, row, westCol, row);
+        }
+
+        // East sidewalk: runs along rows
+        for (let row = northRow + offset; row <= southRow; row += SPACING) {
+          if (row >= this.mapRows || eastCol >= this.mapCols) continue;
+          placeLamp(eastCol, row, eastCol, row);
+        }
+
+        // North sidewalk: runs along cols
+        for (let col = westCol + offset; col <= eastCol; col += SPACING) {
+          if (col >= this.mapCols) continue;
+          placeLamp(col, northRow, col, northRow);
+        }
+
+        // South sidewalk: runs along cols
+        for (let col = westCol + offset; col <= eastCol; col += SPACING) {
+          if (col >= this.mapCols || southRow >= this.mapRows) continue;
+          placeLamp(col, southRow, col, southRow);
         }
       }
     }
@@ -511,25 +687,38 @@ export class GameScene extends Phaser.Scene {
 
     // Asset counts
     const sections = [
-      { label: "DOORS", prefix: "door", count: 6, targetH: 128 },
-      { label: "DOOR CAND.", prefix: "door-candidate", count: 10, targetH: 128 },
-      { label: "WINDOWS", prefix: "window", count: 12, targetH: 96 },
-      { label: "BARRED WIN", prefix: "barred-window", count: 14, targetH: 96 },
-      { label: "GLASS WIN", prefix: "glass-window", count: 6, targetH: 96 },
-      { label: "METAL DOOR", prefix: "metal-door", count: 14, targetH: 128 },
-      { label: "GLASS DOOR", prefix: "glass-door", count: 6, targetH: 128 },
-      { label: "BARRED DOOR", prefix: "barred-door", count: 9, targetH: 128 },
-      { label: "GLASS BAR DOOR", prefix: "glass-barred-door", count: 9, targetH: 128 },
-      { label: "TRAFFIC LIGHT", prefix: "traffic-light", count: 8, targetH: 140 },
-      { label: "SEWER GRATE", prefix: "sewer-grate", count: 10, targetH: 48 },
-      { label: "GARBAGE BIN", prefix: "garbage-bin", count: 6, targetH: 64 },
+      { label: "DOORS", prefix: "door", tag: "D", count: 6, targetH: 128 },
+      { label: "DOOR CAND.", prefix: "door-candidate", tag: "DC", count: 10, targetH: 128 },
+      { label: "WINDOWS", prefix: "window", tag: "W", count: 12, targetH: 96 },
+      { label: "BARRED WIN", prefix: "barred-window", tag: "BW", count: 14, targetH: 96 },
+      { label: "GLASS WIN", prefix: "glass-window", tag: "GW", count: 6, targetH: 96 },
+      { label: "METAL DOOR", prefix: "metal-door", tag: "MD", count: 14, targetH: 128 },
+      { label: "GLASS DOOR", prefix: "glass-door", tag: "GD", count: 6, targetH: 128 },
+      { label: "BARRED DOOR", prefix: "barred-door", tag: "BD", count: 9, targetH: 128 },
+      { label: "GLASS BAR DOOR", prefix: "glass-barred-door", tag: "GB", count: 9, targetH: 128 },
+      { label: "TRAFFIC LIGHT", prefix: "traffic-light", tag: "TL", count: 8, targetH: 140 },
+      { label: "SEWER GRATE", prefix: "sewer-grate", tag: "SG", count: 10, targetH: 48 },
+      { label: "GARBAGE BIN", prefix: "garbage-bin", tag: "BN", count: 6, targetH: 64 },
+      { label: "VENDING MACH", prefix: "vending-machine", tag: "VM", count: 9, targetH: 96 },
+      { label: "ELEC BOX", prefix: "elec-box", tag: "EB", count: 1, targetH: 96 },
+      { label: "WALL VENT", prefix: "wall-vent", tag: "WV", count: 3, targetH: 80 },
+      { label: "WALL PIPE", prefix: "wall-pipe", tag: "WP", count: 1, targetH: 80 },
+      { label: "GARAGE DOOR", prefix: "garage-door", tag: "GR", count: 9, targetH: 128 },
+      { label: "GARBAGE", prefix: "garbage", tag: "GA", count: 10, targetH: 64 },
+      { label: "DEBRIS", prefix: "debris", tag: "DE", count: 10, targetH: 64 },
+      { label: "BOXES", prefix: "boxes", tag: "BX", count: 10, targetH: 64 },
+      { label: "SCRAPS", prefix: "scraps", tag: "SC", count: 10, targetH: 64 },
+      { label: "FIRE HYDRANT", prefix: "fire-hydrant", tag: "FH", count: 10, targetH: 96 },
+      { label: "STREET LAMP", prefix: "street-lamp", tag: "SL", count: 10, targetH: 140 },
+      { label: "STEAM VENT", prefix: "steam-vent", tag: "SV", count: 10, targetH: 64 },
+      { label: "DUMPSTER", prefix: "dumpster", tag: "DU", count: 10, targetH: 96 },
     ];
     const TOTAL = sections.reduce((s, sec) => s + sec.count, 0);
 
     // Big SE-facing wall at NW corner
     const wallCol = 1;
     const rStart = 1;
-    const rEnd = 350;
+    const rEnd = 700;
     const wallHeight = 350;
 
     const E = isoToScreen(wallCol, rStart);
@@ -568,12 +757,12 @@ export class GameScene extends Phaser.Scene {
       img.setOrigin(0.5, 1).setScale(scale);
       img.setDepth(wallDepth + 0.1);
 
-      this.add.text(wx, wy - 10, label, {
+      this.add.text(wx, wy - 30 - targetH - 8, label, {
         fontFamily: "Arial, Helvetica, sans-serif",
-        fontSize: "14px",
+        fontSize: "24px",
         color: "#00ffff",
         fontStyle: "bold",
-      }).setOrigin(0.5).setResolution(dpr).setDepth(wallDepth + 0.2);
+      }).setOrigin(0.5, 1).setResolution(dpr).setDepth(wallDepth + 0.2);
     };
 
     let slot = 0;
@@ -581,7 +770,7 @@ export class GameScene extends Phaser.Scene {
     for (const sec of sections) {
       const startSlot = slot;
       for (let i = 0; i < sec.count; i++) {
-        const shortLabel = sec.prefix.charAt(0).toUpperCase() + i;
+        const shortLabel = sec.tag + i;
         placeAsset(slot++, `${sec.prefix}-${i}`, shortLabel, sec.targetH);
       }
 

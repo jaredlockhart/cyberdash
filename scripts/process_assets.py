@@ -179,6 +179,8 @@ def main():
                         help="Starting index for output numbering (default: 0)")
     parser.add_argument("--tolerance", type=float, default=DEFAULT_TOLERANCE,
                         help=f"Max slope deviation from -0.5 (default: {DEFAULT_TOLERANCE})")
+    parser.add_argument("--no-shear", action="store_true",
+                        help="Skip shear correction (for ground-level assets)")
     parser.add_argument("--dry-run", action="store_true",
                         help="Show what would be kept without saving")
     args = parser.parse_args()
@@ -213,10 +215,13 @@ def main():
             continue
         print(f"  Slope: {slope:.3f} OK")
 
-        # Step 5: Shear-correct
-        img = shear_correct(img)
-        final_slope = measure_slope(img)
-        print(f"  Corrected: {img.size[0]}x{img.size[1]}, slope={final_slope:.3f}")
+        # Step 5: Shear-correct (skip for ground-level assets)
+        if not args.no_shear:
+            img = shear_correct(img)
+            final_slope = measure_slope(img)
+            print(f"  Corrected: {img.size[0]}x{img.size[1]}, slope={final_slope:.3f}")
+        else:
+            print(f"  Skipped shear correction")
 
         # Step 6: Postprocess
         img = postprocess(img)

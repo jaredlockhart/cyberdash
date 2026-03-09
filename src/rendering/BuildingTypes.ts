@@ -19,6 +19,7 @@ export interface Building {
   doorSide: "left" | "right";
   doorInset: number;   // pixels inset from wall edge
   doorTexture: number; // 0-2, door image variant
+  windowTexture: number; // 0-5, window style variant (for future textures)
 }
 
 // Dark cyberpunk color palette — base hues with consistent lighting

@@ -24,6 +24,40 @@ PRESETS = {
 }
 
 
+def fix_iso_facing(img: Image.Image) -> tuple[Image.Image, bool]:
+    """Auto-detect and fix SE wall facing.
+
+    For SE-facing isometric assets, the lowest visible pixel should be
+    on the bottom-left (the SE wall slopes down-right at -0.5).
+    If the lowest pixel is on the right side, the image is facing SW
+    and needs a horizontal flip.
+
+    Returns (image, was_flipped).
+    """
+    pixels = img.load()
+    w, h = img.size
+
+    # Find the bottommost row with visible pixels, then check
+    # whether the rightmost visible pixel in that row is on the
+    # right half of the image.
+    for y in range(h - 1, -1, -1):
+        left_x = None
+        right_x = None
+        for x in range(w):
+            if pixels[x, y][3] > 32:
+                if left_x is None:
+                    left_x = x
+                right_x = x
+        if left_x is not None and right_x is not None:
+            center = w / 2
+            # If the bottom-right extent is further from center than bottom-left
+            if (right_x - center) > (center - left_x):
+                return img.transpose(Image.FLIP_LEFT_RIGHT), True
+            return img, False
+
+    return img, False
+
+
 def process_image(
     img: Image.Image,
     brightness: float,
@@ -96,6 +130,7 @@ def main():
     parser.add_argument("--suffix", type=str, default="", help="Append before extension (e.g. _dark)")
     parser.add_argument("--preview", action="store_true", help="Generate side-by-side comparison PNGs")
     parser.add_argument("--preset", type=str, default="cyberdark", choices=PRESETS.keys(), help="Parameter preset (default: cyberdark)")
+    parser.add_argument("--fix-facing", action="store_true", help="Auto-detect and flip SW-facing assets to SE")
 
     args = parser.parse_args()
 
@@ -129,6 +164,10 @@ def main():
             continue
 
         img = Image.open(input_path).convert("RGBA")
+        if args.fix_facing:
+            img, flipped = fix_iso_facing(img)
+            if flipped:
+                print(f"  FLIPPED {input_path.name} (was facing SW)")
         result = process_image(img, brightness, blue_shift, contrast, gamma, alpha_threshold)
 
         stem = input_path.stem + args.suffix

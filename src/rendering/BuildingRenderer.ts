@@ -1,44 +1,47 @@
 import Phaser from "phaser";
-import { TILE_W, TILE_H, isoToScreen } from "../iso/IsoGeometry";
+import { TILE_W, TILE_H } from "../iso/IsoGeometry";
 import { STORY_HEIGHT } from "../iso/CityLayout";
 import { Building } from "./BuildingTypes";
-
-interface Corner { x: number; y: number }
-
-/**
- * Compute the 4 ground-level corners of a building's iso diamond,
- * compressed inward along the col axis by the inset amount.
- */
-function buildingCorners(b: Building): { N: Corner; E: Corner; S: Corner; W: Corner } {
-  const insOff = b.inset * TILE_W / 2;
-  const insOffY = b.inset * TILE_H / 2;
-
-  const nBase = isoToScreen(b.colStart, b.rowStart);
-  const eBase = isoToScreen(b.colEnd, b.rowStart);
-  const sBase = isoToScreen(b.colEnd, b.rowEnd);
-  const wBase = isoToScreen(b.colStart, b.rowEnd);
-
-  return {
-    N: { x: nBase.x + insOff, y: nBase.y - TILE_H / 2 + insOffY },
-    E: { x: eBase.x + TILE_W / 2 - insOff, y: eBase.y - insOffY },
-    S: { x: sBase.x - insOff, y: sBase.y + TILE_H / 2 - insOffY },
-    W: { x: wBase.x - TILE_W / 2 + insOff, y: wBase.y + insOffY },
-  };
-}
+import { buildingCorners, tileInsetPosition, computeBuildingMetrics, WIN_MAX_SCALE, WIN_GAP, WIN_DOOR_GAP, WIN_WALL_MARGIN, WIN_BOTTOM, WIN_MIN_ZONE } from "./BuildingMetrics";
+export type { BuildingMetrics } from "./BuildingMetrics";
+export { computeBuildingMetrics } from "./BuildingMetrics";
 
 /**
- * Compute the inset-adjusted screen position for a tile within a building.
+ * Browser-side wrapper: reads texture sizes from Phaser and logs to console.
  */
-function tileInsetPosition(b: Building, col: number, row: number): Corner {
-  const { x, y } = isoToScreen(col, row);
-  const span = b.colEnd - b.colStart;
-  const relCol = col - b.colStart;
-  const t = span > 0 ? relCol / span : 0.5;
-  const dc = b.inset * (1 - 2 * t);
-  return {
-    x: x + dc * (TILE_W / 2),
-    y: y + dc * (TILE_H / 2),
-  };
+export function dumpBuildingMetrics(
+  scene: Phaser.Scene,
+  buildings: Building[],
+) {
+  const metrics = computeBuildingMetrics(buildings, (key) => {
+    const src = scene.textures.get(key)?.getSourceImage();
+    return { w: src?.width ?? 0, h: src?.height ?? 0 };
+  });
+
+  console.table(metrics.map(m => ({
+    "#": m.index,
+    rows: m.rowSpan,
+    stories: m.stories,
+    seWall: m.seWallLen,
+    door: `${m.doorTexW}x${m.doorTexH} d${m.doorTexture}`,
+    doorSide: m.doorSide,
+    zone: m.windowZone,
+    nWin: m.winCount,
+    winTex: `${m.winTexW}x${m.winTexH} w${m.windowTexture}`,
+    winScale: m.winScale,
+    winRendered: `${m.winRenderedW}x${m.winRenderedH}`,
+    "win/door": m.winDoorRatio,
+  })));
+
+  const ratios = metrics.filter(m => m.winScale > 0).map(m => m.winDoorRatio);
+  if (ratios.length > 0) {
+    const min = Math.min(...ratios);
+    const max = Math.max(...ratios);
+    const avg = ratios.reduce((a, b) => a + b, 0) / ratios.length;
+    console.log(`Window/door height ratio — min: ${min}, max: ${max}, avg: ${avg.toFixed(2)}, n=${ratios.length}`);
+  }
+
+  return metrics;
 }
 
 /**
@@ -131,12 +134,61 @@ export function renderBuilding(
     objects.push(img);
   }
 
-  // Door image on SE wall — depth must be above the closest-to-camera wall tile it overlaps
-  const doorNearRow = Math.min(building.rowEnd,
-    Math.floor(building.rowEnd - (doorAlong - TILE_W) / (TILE_W / 2)));
+  // Door image on SE wall — depth from S-ward (camera-nearest) edge
+  const doorNearT = seWallLen > 0 ? doorAlong / seWallLen : 0;
+  const doorNearRow = building.rowEnd + (building.rowStart - building.rowEnd) * doorNearT;
   const doorImg = scene.add.image(doorX, doorY, `door-${building.doorTexture}`);
-  doorImg.setOrigin(0.5, 1).setDepth(building.colEnd + doorNearRow + 0.1);
+  doorImg.setOrigin(0.5, 1).setDepth(building.colEnd + Math.ceil(doorNearRow) + 0.5);
   objects.push(doorImg);
+
+  // --- Ground-floor storefront windows on SE wall ---
+  let windowStart: number;
+  let windowEnd: number;
+
+  if (building.doorSide === "left") {
+    windowStart = doorAlong + doorWidth + WIN_DOOR_GAP;
+    windowEnd = seWallLen - WIN_WALL_MARGIN;
+  } else {
+    windowStart = WIN_WALL_MARGIN;
+    windowEnd = doorAlong - WIN_DOOR_GAP;
+  }
+
+  const windowZone = windowEnd - windowStart;
+  if (windowZone >= WIN_MIN_ZONE) {
+    const texKey = `window-${building.windowTexture}`;
+    // Probe texture size (creates a temporary image)
+    const probe = scene.textures.getFrame(texKey);
+    const texW = probe?.width ?? 128;
+
+    // Single window width at max scale
+    const singleW = texW * WIN_MAX_SCALE;
+    // How many windows fit with gaps between them?
+    const count = Math.max(1, Math.floor((windowZone + WIN_GAP) / (singleW + WIN_GAP)));
+    // Actual scale: divide available space evenly (minus gaps), then cap
+    const perWinWidth = (windowZone - WIN_GAP * (count - 1)) / count;
+    const scale = Math.min(WIN_MAX_SCALE, perWinWidth / texW);
+
+    const actualWinW = texW * scale;
+    // Total width of all windows + gaps
+    const totalW = actualWinW * count + WIN_GAP * (count - 1);
+    // Center the window group within the zone
+    const offsetStart = windowStart + (windowZone - totalW) / 2;
+
+    for (let i = 0; i < count; i++) {
+      const along = offsetStart + i * (actualWinW + WIN_GAP);
+      const winX = S.x + along;
+      const winY = S.y - along * 0.5 - WIN_BOTTOM;
+
+      // Depth from S-ward (camera-nearest) edge of this window
+      const winNearT = seWallLen > 0 ? along / seWallLen : 0;
+      const winNearRow = building.rowEnd + (building.rowStart - building.rowEnd) * winNearT;
+
+      const winImg = scene.add.image(winX, winY, texKey);
+      winImg.setOrigin(0, 1).setScale(scale, scale);
+      winImg.setDepth(building.colEnd + Math.ceil(winNearRow) + 0.5);
+      objects.push(winImg);
+    }
+  }
 
   return objects;
 }

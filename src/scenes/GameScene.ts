@@ -2,7 +2,7 @@ import Phaser from "phaser";
 import { TILE_W, TILE_H, isoToScreen, screenToIso } from "../iso/IsoGeometry";
 import { COL_PERIOD, ROW_PERIOD, STREET_WIDTH, SIDEWALK_WIDTH, BLOCK_INTERIOR, TileType, CURB_HEIGHT } from "../iso/CityLayout";
 import { Building, BUILDING_PALETTE } from "../rendering/BuildingTypes";
-import { renderBuilding } from "../rendering/BuildingRenderer";
+import { renderBuilding, dumpBuildingMetrics } from "../rendering/BuildingRenderer";
 import { renderStreetTile, renderSidewalkTile } from "../rendering/StreetRenderer";
 
 type Direction =
@@ -70,12 +70,12 @@ export class GameScene extends Phaser.Scene {
     }
 
     // Spawn player on a street tile
-    const spawnCol = 4 + COL_PERIOD;
-    const spawnRow = 4 + ROW_PERIOD;
+    const spawnCol = 4;
+    const spawnRow = 4;
     const { x: spawnX, y: spawnY } = isoToScreen(spawnCol, spawnRow);
 
     this.player = this.add.sprite(spawnX, spawnY, "player-south");
-    this.player.setScale(2);
+    this.player.setScale(1.5);
     this.physics.add.existing(this.player);
 
     const playerBody = this.player.body as Phaser.Physics.Arcade.Body;
@@ -186,7 +186,6 @@ export class GameScene extends Phaser.Scene {
       const prefix = running ? "run" : "walk";
       const animKey = `${prefix}-${this.facing}`;
       if (this.player.anims.currentAnim?.key !== animKey || !this.player.anims.isPlaying) {
-        this.player.stop();
         this.player.play(animKey);
       }
     } else {
@@ -300,7 +299,8 @@ export class GameScene extends Phaser.Scene {
           const heightOffset = Math.floor(h(5) * 60);
           const doorSide = h(6) < 0.5 ? "left" as const : "right" as const;
           const doorInset = 10 + Math.floor(h(7) * 30);
-          const doorTexture = Math.floor(h(8) * 9);
+          const doorTexture = Math.floor(h(8) * 16);
+          const windowTexture = Math.floor(h(9) * 14);
 
           this.buildings.push({
             colStart: baseCol,
@@ -315,6 +315,7 @@ export class GameScene extends Phaser.Scene {
             doorSide,
             doorInset,
             doorTexture,
+            windowTexture,
           });
 
           rowOffset += depth;
@@ -388,5 +389,106 @@ export class GameScene extends Phaser.Scene {
       const objects = renderBuilding(this, building);
       this.buildingObjects.push({ data: building, objects });
     }
+
+    // Diagnostic: dump building/window/door metrics to console
+    dumpBuildingMetrics(this, this.buildings);
+
+    // Asset showroom at NW corner
+    this.drawShowroom();
+  }
+
+  private drawShowroom() {
+    const dpr = window.devicePixelRatio || 1;
+
+    // Existing assets
+    const NUM_DOORS = 6;
+    const NUM_WINDOWS = 14;
+    // New candidates
+    const NUM_DOOR_CANDIDATES = 10;
+
+    const TOTAL = NUM_DOORS + NUM_WINDOWS + NUM_DOOR_CANDIDATES;
+
+    // Big SE-facing wall at NW corner: col=1, rows 1..90
+    const wallCol = 1;
+    const rStart = 1;
+    const rEnd = 150;
+    const wallHeight = 350;
+
+    const E = isoToScreen(wallCol, rStart);
+    const S = isoToScreen(wallCol, rEnd);
+    const Er = { x: E.x, y: E.y - wallHeight };
+    const Sr = { x: S.x, y: S.y - wallHeight };
+
+    const wallDepth = wallCol + rEnd;
+
+    // Wall backdrop
+    const gfx = this.add.graphics();
+    gfx.setDepth(wallDepth);
+    gfx.fillStyle(0x2a2a35, 1);
+    gfx.fillPoints([
+      new Phaser.Geom.Point(E.x, E.y),
+      new Phaser.Geom.Point(S.x, S.y),
+      new Phaser.Geom.Point(Sr.x, Sr.y),
+      new Phaser.Geom.Point(Er.x, Er.y),
+    ], true);
+
+    const margin = 0.02;
+    const slotWidth = (1 - 2 * margin) / TOTAL;
+
+    // Helper: place an asset on the wall at slot index
+    const placeAsset = (slot: number, texKey: string, label: string, targetH: number) => {
+      const frame = this.textures.getFrame(texKey);
+      if (!frame) return;
+
+      const t = margin + slotWidth * (slot + 0.5);
+      const wx = S.x + t * (E.x - S.x);
+      const wy = S.y + t * (E.y - S.y);
+
+      const scale = targetH / frame.height;
+
+      const img = this.add.image(wx, wy - 30, texKey);
+      img.setOrigin(0.5, 1).setScale(scale);
+      img.setDepth(wallDepth + 0.1);
+
+      this.add.text(wx, wy - 10, label, {
+        fontFamily: "Arial, Helvetica, sans-serif",
+        fontSize: "14px",
+        color: "#00ffff",
+        fontStyle: "bold",
+      }).setOrigin(0.5).setResolution(dpr).setDepth(wallDepth + 0.2);
+    };
+
+    let slot = 0;
+
+    // Existing doors (D0-D5)
+    for (let i = 0; i < NUM_DOORS; i++) {
+      placeAsset(slot++, `door-${i}`, `D${i}`, 180);
+    }
+
+    // New door candidates (ND0-ND9)
+    for (let i = 0; i < NUM_DOOR_CANDIDATES; i++) {
+      placeAsset(slot++, `door-candidate-${i}`, `ND${i}`, 180);
+    }
+
+    // Window candidates (W0-W13)
+    for (let i = 0; i < NUM_WINDOWS; i++) {
+      placeAsset(slot++, `win-candidate-${i}`, `W${i}`, 180);
+    }
+
+    // Section labels along the top of the wall
+    const sectionLabel = (text: string, startSlot: number, endSlot: number) => {
+      const t = margin + slotWidth * ((startSlot + endSlot) / 2 + 0.5);
+      const lx = S.x + t * (E.x - S.x);
+      const ly = S.y + t * (E.y - S.y) - wallHeight + 20;
+      this.add.text(lx, ly, text, {
+        fontFamily: "Arial, Helvetica, sans-serif",
+        fontSize: "12px",
+        color: "#00ffff",
+      }).setOrigin(0.5).setResolution(dpr).setDepth(wallDepth + 0.2);
+    };
+
+    sectionLabel("DOORS (current)", 0, NUM_DOORS - 1);
+    sectionLabel("DOORS (new)", NUM_DOORS, NUM_DOORS + NUM_DOOR_CANDIDATES - 1);
+    sectionLabel("WINDOWS", NUM_DOORS + NUM_DOOR_CANDIDATES, TOTAL - 1);
   }
 }

@@ -32,8 +32,18 @@ export class BootScene extends Phaser.Scene {
     // Tiles
     this.load.image("street", "assets/tilemaps/street_0.png");
     this.load.image("sidewalk", "assets/tilemaps/sidewalk_speckled.png");
-    for (let d = 0; d < 9; d++) {
+    for (let d = 0; d < 16; d++) {
       this.load.image(`door-${d}`, `assets/sprites/door_${d}.png`);
+    }
+    for (let w = 0; w < 14; w++) {
+      this.load.image(`window-${w}`, `assets/sprites/window_${w}.png`);
+    }
+    // Candidate assets for audition
+    for (let c = 0; c < 14; c++) {
+      this.load.image(`win-candidate-${c}`, `assets/sprites/window_candidate_${c}.png`);
+    }
+    for (let c = 0; c < 10; c++) {
+      this.load.image(`door-candidate-${c}`, `assets/sprites/door_candidate_${c}.png`);
     }
     for (let v = 0; v < 6; v++) {
       this.load.image(`bldg-top-v${v}`, `assets/tilemaps/bldg_top_v${v}.png`);

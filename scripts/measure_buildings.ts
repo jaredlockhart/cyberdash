@@ -92,8 +92,8 @@ function generateBuildings(): Building[] {
           heightOffset: Math.floor(h(5) * 60),
           doorSide: h(6) < 0.5 ? "left" : "right",
           doorInset: 10 + Math.floor(h(7) * 30),
-          doorTexture: Math.floor(h(8) * 16),
-          windowTexture: Math.floor(h(9) * 14),
+          doorTexture: Math.floor(h(8) * 6),
+          windowTexture: Math.floor(h(9) * 12),
         });
 
         rowOffset += depth;

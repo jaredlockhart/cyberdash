@@ -299,8 +299,8 @@ export class GameScene extends Phaser.Scene {
           const heightOffset = Math.floor(h(5) * 60);
           const doorSide = h(6) < 0.5 ? "left" as const : "right" as const;
           const doorInset = 10 + Math.floor(h(7) * 30);
-          const doorTexture = Math.floor(h(8) * 16);
-          const windowTexture = Math.floor(h(9) * 14);
+          const doorTexture = Math.floor(h(8) * 6);
+          const windowTexture = Math.floor(h(9) * 12);
 
           this.buildings.push({
             colStart: baseCol,
@@ -400,13 +400,11 @@ export class GameScene extends Phaser.Scene {
   private drawShowroom() {
     const dpr = window.devicePixelRatio || 1;
 
-    // Existing assets
     const NUM_DOORS = 6;
-    const NUM_WINDOWS = 14;
-    // New candidates
     const NUM_DOOR_CANDIDATES = 10;
+    const NUM_WINDOWS = 12;
 
-    const TOTAL = NUM_DOORS + NUM_WINDOWS + NUM_DOOR_CANDIDATES;
+    const TOTAL = NUM_DOORS + NUM_DOOR_CANDIDATES + NUM_WINDOWS;
 
     // Big SE-facing wall at NW corner: col=1, rows 1..90
     const wallCol = 1;
@@ -470,9 +468,9 @@ export class GameScene extends Phaser.Scene {
       placeAsset(slot++, `door-candidate-${i}`, `ND${i}`, 180);
     }
 
-    // Window candidates (W0-W13)
+    // Active windows (W0-W11)
     for (let i = 0; i < NUM_WINDOWS; i++) {
-      placeAsset(slot++, `win-candidate-${i}`, `W${i}`, 180);
+      placeAsset(slot++, `window-${i}`, `W${i}`, 180);
     }
 
     // Section labels along the top of the wall

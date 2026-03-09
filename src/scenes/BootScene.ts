@@ -61,6 +61,16 @@ export class BootScene extends Phaser.Scene {
     for (let i = 0; i < 9; i++) {
       this.load.image(`glass-barred-door-${i}`, `assets/sprites/glass_barred_door_${i}.png`);
     }
+    // Street props
+    for (let i = 0; i < 8; i++) {
+      this.load.image(`traffic-light-${i}`, `assets/sprites/traffic_light_${i}.png`);
+    }
+    for (let i = 0; i < 10; i++) {
+      this.load.image(`sewer-grate-${i}`, `assets/sprites/sewer_grate_${i}.png`);
+    }
+    for (let i = 0; i < 6; i++) {
+      this.load.image(`garbage-bin-${i}`, `assets/sprites/garbage_bin_${i}.png`);
+    }
     for (let v = 0; v < 6; v++) {
       this.load.image(`bldg-top-v${v}`, `assets/tilemaps/bldg_top_v${v}.png`);
       for (const s of [2, 3, 4]) {

@@ -17,14 +17,42 @@
         align-items: center;
         height: 100vh;
       }
-      canvas {
+      #game-container {
+        position: relative;
+        aspect-ratio: 16 / 9;
+        max-width: 100vw;
+        max-height: 100vh;
+        width: auto;
+        height: 100vh;
+      }
+      @media (max-aspect-ratio: 16/9) {
+        #game-container {
+          width: 100vw;
+          height: auto;
+        }
+      }
+      #game, #game canvas {
+        width: 100% !important;
+        height: 100% !important;
         image-rendering: pixelated;
         image-rendering: crisp-edges;
       }
     </style>
   </head>
   <body>
-    <div id="game"></div>
+    <div id="game-container" style="position: relative;">
+      <div id="game"></div>
+      <div id="hud" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; font-family: Arial, Helvetica, sans-serif;">
+        <div id="hud-title" style="position: absolute; top: 2%; left: 50%; transform: translateX(-50%); color: #00ffff; font-size: 24px; font-weight: bold;">CYBERDASH</div>
+        <div id="hud-subtitle" style="position: absolute; top: 7%; left: 50%; transform: translateX(-50%); color: #666; font-size: 13px;">Arrow keys to move &bull; Hold SHIFT to run</div>
+        <div id="hud-fps" style="position: absolute; top: 1%; left: 1%; color: #555; font-size: 13px;"></div>
+        <div id="hud-compass" style="position: absolute; top: 2%; right: 3%; color: #888; font-size: 12px; text-align: center; line-height: 1.4;">
+          <span style="color: #555;">N</span><br>
+          <span style="color: #555;">NW</span> &#x2572;&#x2571; <span style="color: #555;">NE</span><br>
+          <span style="color: #555;">SW</span> &#x2571;&#x2572; <span style="color: #555;">SE</span>
+        </div>
+      </div>
+    </div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

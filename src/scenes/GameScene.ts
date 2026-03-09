@@ -26,7 +26,7 @@ export class GameScene extends Phaser.Scene {
     data: Building;
     objects: Phaser.GameObjects.GameObject[];
   }[] = [];
-  private fpsText!: Phaser.GameObjects.Text;
+  private fpsEl!: HTMLElement | null;
 
   // Walk tuning
   private walkSpeed = 160;
@@ -85,69 +85,19 @@ export class GameScene extends Phaser.Scene {
     this.physics.add.collider(this.player, walls);
 
     // Camera
+    this.cameras.main.setZoom(0.5);
     this.cameras.main.startFollow(this.player, true, 0.08, 0.08);
     this.cameras.main.setDeadzone(40, 40);
 
-    // HUD
-    const dpr = window.devicePixelRatio || 1;
-
-    this.add
-      .text(480, 24, "CYBERDASH", {
-        fontFamily: "Arial, Helvetica, sans-serif",
-        fontSize: "20px",
-        color: "#00ffff",
-        fontStyle: "bold",
-      })
-      .setOrigin(0.5)
-      .setResolution(dpr)
-      .setScrollFactor(0)
-      .setDepth(1000);
-
-    this.add
-      .text(480, 52, "Arrow keys to move \u2022 Hold SHIFT to run", {
-        fontFamily: "Arial, Helvetica, sans-serif",
-        fontSize: "10px",
-        color: "#666666",
-      })
-      .setOrigin(0.5)
-      .setResolution(dpr)
-      .setScrollFactor(0)
-      .setDepth(1000);
-
-    // Isometric compass
-    const compass = this.add.graphics();
-    compass.setScrollFactor(0);
-    compass.setDepth(1000);
-    const cx = 900, cy = 60, cLen = 20;
-    compass.lineStyle(1, 0x555555);
-    compass.lineBetween(cx - cLen, cy - cLen / 2, cx + cLen, cy + cLen / 2);
-    compass.lineBetween(cx + cLen, cy - cLen / 2, cx - cLen, cy + cLen / 2);
-
-    const compassLabel = (text: string, ox: number, oy: number) => {
-      this.add.text(cx + ox, cy + oy, text, {
-        fontFamily: "Arial, Helvetica, sans-serif",
-        fontSize: "8px",
-        color: "#888888",
-      }).setOrigin(0.5).setResolution(dpr).setScrollFactor(0).setDepth(1000);
-    };
-    compassLabel("NW", -cLen - 8, -cLen / 2 - 6);
-    compassLabel("SE", cLen + 8, cLen / 2 + 6);
-    compassLabel("NE", cLen + 8, -cLen / 2 - 6);
-    compassLabel("SW", -cLen - 8, cLen / 2 + 6);
-    compassLabel("N", 0, -cLen / 2 - 10);
-
-    this.fpsText = this.add.text(8, 8, "", {
-      fontFamily: "Arial, Helvetica, sans-serif",
-      fontSize: "10px",
-      color: "#555555",
-    }).setResolution(dpr).setScrollFactor(0).setDepth(1000);
+    // HUD is rendered as HTML overlay (see index.html) for native resolution
+    this.fpsEl = document.getElementById("hud-fps");
 
     this.cursors = this.input.keyboard!.createCursorKeys();
     this.shiftKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.SHIFT);
   }
 
   update() {
-    this.fpsText.setText(`${Math.round(this.game.loop.actualFps)} fps`);
+    if (this.fpsEl) this.fpsEl.textContent = `${Math.round(this.game.loop.actualFps)} fps`;
 
     const body = this.player.body as Phaser.Physics.Arcade.Body;
     const running = this.shiftKey.isDown;
@@ -393,8 +343,167 @@ export class GameScene extends Phaser.Scene {
     // Diagnostic: dump building/window/door metrics to console
     dumpBuildingMetrics(this, this.buildings);
 
+    // Traffic lights at intersection corners
+    this.placeTrafficLights();
+
+    // Sewer grates scattered on streets
+    this.placeSewerGrates();
+
+    // Garbage bins on sidewalks
+    this.placeGarbageBins();
+
     // Asset showroom at NW corner
     this.drawShowroom();
+  }
+
+  private placeTrafficLights() {
+    const TRAFFIC_LIGHT_H = 140; // rendered height in pixels
+    const texKey = "traffic-light-2";
+    const frame = this.textures.getFrame(texKey);
+    if (!frame) return;
+    const scale = TRAFFIC_LIGHT_H / frame.height;
+
+    const numBlockCols = Math.floor(this.mapCols / COL_PERIOD);
+    const numBlockRows = Math.floor(this.mapRows / ROW_PERIOD);
+
+    // Each intersection is at (bCol * COL_PERIOD, bRow * ROW_PERIOD).
+    // Streets occupy cols 0..7 and rows 0..7 within each period.
+    // Place traffic lights on the 4 sidewalk corners just outside each intersection.
+    for (let bRow = 0; bRow <= numBlockRows; bRow++) {
+      for (let bCol = 0; bCol <= numBlockCols; bCol++) {
+        const streetColStart = bCol * COL_PERIOD;
+        const streetRowStart = bRow * ROW_PERIOD;
+        const streetColEnd = streetColStart + STREET_WIDTH - 1;
+        const streetRowEnd = streetRowStart + STREET_WIDTH - 1;
+
+        // 4 corners: just outside the street on the sidewalk
+        // flip = true for E (NE) and W (SW) corners
+        const corners = [
+          { col: streetColEnd + 1, row: streetRowEnd + 1, flip: false },   // S (SE)
+          { col: streetColStart - 1, row: streetRowEnd + 1, flip: true },  // W (SW)
+          { col: streetColEnd + 1, row: streetRowStart - 1, flip: true },  // E (NE)
+          { col: streetColStart - 1, row: streetRowStart - 1, flip: false }, // N (NW)
+        ];
+
+        for (const c of corners) {
+          if (c.col < 0 || c.col >= this.mapCols || c.row < 0 || c.row >= this.mapRows) continue;
+
+          const pos = isoToScreen(c.col, c.row);
+          const img = this.add.image(pos.x, pos.y, texKey);
+          img.setOrigin(0.5, 1).setScale(scale);
+          if (c.flip) img.setFlipX(true);
+          img.setDepth(c.col + c.row + 0.5);
+        }
+      }
+    }
+  }
+
+  private placeSewerGrates() {
+    const NUM_GRATES = 10;
+    const GRATE_W = 48; // rendered width in pixels
+    const numBlockCols = Math.floor(this.mapCols / COL_PERIOD);
+    const numBlockRows = Math.floor(this.mapRows / ROW_PERIOD);
+
+    // Place one grate per street segment between intersections
+    for (let bRow = 0; bRow < numBlockRows; bRow++) {
+      for (let bCol = 0; bCol < numBlockCols; bCol++) {
+        // Horizontal street segment (runs along cols, within row street band)
+        const hStreetRowStart = bRow * ROW_PERIOD;
+        const hStreetColStart = bCol * COL_PERIOD + STREET_WIDTH;
+        const hStreetColEnd = (bCol + 1) * COL_PERIOD - 1;
+
+        const h1 = this.hash(bCol, bRow, 200);
+        const hCol = hStreetColStart + Math.floor(h1 * (hStreetColEnd - hStreetColStart - 2)) + 1;
+        // Avoid center line (rowMod === 4 for horizontal streets)
+        const centerLine = Math.floor(STREET_WIDTH / 2); // 4
+        const hLanes = [];
+        for (let l = 1; l < STREET_WIDTH - 1; l++) {
+          if (l !== centerLine) hLanes.push(l);
+        }
+        const h2 = this.hash(bCol, bRow, 201);
+        const hRow = hStreetRowStart + hLanes[Math.floor(h2 * hLanes.length)];
+        const hTex = 4; // standardized on s4
+
+        const hPos = isoToScreen(hCol, hRow);
+        const frame = this.textures.getFrame(`sewer-grate-${hTex}`);
+        if (frame) {
+          const scale = GRATE_W / frame.width;
+          const img = this.add.image(hPos.x, hPos.y, `sewer-grate-${hTex}`);
+          img.setOrigin(0.5, 0.5).setScale(scale).setDepth(0.4);
+          // Slight depth above street tiles
+        }
+
+        // Vertical street segment (runs along rows, within col street band)
+        const vStreetColStart = bCol * COL_PERIOD;
+        const vStreetRowStart = bRow * ROW_PERIOD + STREET_WIDTH;
+        const vStreetRowEnd = (bRow + 1) * ROW_PERIOD - 1;
+
+        const v1 = this.hash(bCol, bRow, 210);
+        const vRow = vStreetRowStart + Math.floor(v1 * (vStreetRowEnd - vStreetRowStart - 2)) + 1;
+        // Avoid center line (colMod === 4 for vertical streets)
+        const vLanes = [];
+        for (let l = 1; l < STREET_WIDTH - 1; l++) {
+          if (l !== centerLine) vLanes.push(l);
+        }
+        const v2 = this.hash(bCol, bRow, 211);
+        const vCol = vStreetColStart + vLanes[Math.floor(v2 * vLanes.length)];
+        const vTex = 4; // standardized on s4
+
+        const vPos = isoToScreen(vCol, vRow);
+        const vFrame = this.textures.getFrame(`sewer-grate-${vTex}`);
+        if (vFrame) {
+          const vScale = GRATE_W / vFrame.width;
+          const vImg = this.add.image(vPos.x, vPos.y, `sewer-grate-${vTex}`);
+          vImg.setOrigin(0.5, 0.5).setScale(vScale).setDepth(0.4);
+        }
+      }
+    }
+  }
+
+  private placeGarbageBins() {
+    const NUM_BINS = 6;
+    const BIN_H = 48; // rendered height in pixels
+    const numBlockCols = Math.floor(this.mapCols / COL_PERIOD);
+    const numBlockRows = Math.floor(this.mapRows / ROW_PERIOD);
+
+    // Sidewalk runs from STREET_WIDTH to BLOCK_INTERIOR.colStart (cols 8-11)
+    // and STREET_WIDTH to BLOCK_INTERIOR.rowStart (rows 8-11)
+    // Place one bin per block on the SE sidewalk edge and one on the SW sidewalk edge
+    for (let bRow = 0; bRow < numBlockRows; bRow++) {
+      for (let bCol = 0; bCol < numBlockCols; bCol++) {
+        // SE sidewalk (along colEnd+1 edge, between rowStart and rowEnd)
+        const seCol = bCol * COL_PERIOD + BLOCK_INTERIOR.colEnd + 1;
+        const seRowStart = bRow * ROW_PERIOD + BLOCK_INTERIOR.rowStart;
+        const seRowEnd = bRow * ROW_PERIOD + BLOCK_INTERIOR.rowEnd;
+        const h1 = this.hash(bCol, bRow, 300);
+        const seRow = seRowStart + Math.floor(h1 * (seRowEnd - seRowStart));
+        const seTex = Math.floor(this.hash(bCol, bRow, 301) * NUM_BINS);
+
+        const sePos = isoToScreen(seCol, seRow);
+        const seFrame = this.textures.getFrame(`garbage-bin-${seTex}`);
+        if (seFrame) {
+          const scale = BIN_H / seFrame.height;
+          const img = this.add.image(sePos.x, sePos.y, `garbage-bin-${seTex}`);
+          img.setOrigin(0.5, 1).setScale(scale).setDepth(seCol + seRow + 0.5);
+        }
+
+        // SW sidewalk (along rowEnd+1 edge, between colStart and colEnd)
+        const swRow = bRow * ROW_PERIOD + BLOCK_INTERIOR.rowEnd + 1;
+        const swColStart = bCol * COL_PERIOD + BLOCK_INTERIOR.colStart;
+        const swColEnd = bCol * COL_PERIOD + BLOCK_INTERIOR.colEnd;
+        const h2 = this.hash(bCol, bRow, 310);
+        const swCol = swColStart + Math.floor(h2 * (swColEnd - swColStart));
+        const swTex = Math.floor(this.hash(bCol, bRow, 311) * NUM_BINS);
+
+        const swPos = isoToScreen(swCol, swRow);
+        const swFrame = this.textures.getFrame(`garbage-bin-${swTex}`);
+        if (swFrame) {
+          const scale = BIN_H / swFrame.height;
+          const img = this.add.image(swPos.x, swPos.y, `garbage-bin-${swTex}`);
+          img.setOrigin(0.5, 1).setScale(scale).setDepth(swCol + swRow + 0.5);
+        }
+      }
+    }
   }
 
   private drawShowroom() {
@@ -402,15 +511,18 @@ export class GameScene extends Phaser.Scene {
 
     // Asset counts
     const sections = [
-      { label: "DOORS", prefix: "door", count: 6 },
-      { label: "DOOR CAND.", prefix: "door-candidate", count: 10 },
-      { label: "WINDOWS", prefix: "window", count: 12 },
-      { label: "BARRED WIN", prefix: "barred-window", count: 14 },
-      { label: "GLASS WIN", prefix: "glass-window", count: 6 },
-      { label: "METAL DOOR", prefix: "metal-door", count: 14 },
-      { label: "GLASS DOOR", prefix: "glass-door", count: 6 },
-      { label: "BARRED DOOR", prefix: "barred-door", count: 9 },
-      { label: "GLASS BAR DOOR", prefix: "glass-barred-door", count: 9 },
+      { label: "DOORS", prefix: "door", count: 6, targetH: 128 },
+      { label: "DOOR CAND.", prefix: "door-candidate", count: 10, targetH: 128 },
+      { label: "WINDOWS", prefix: "window", count: 12, targetH: 96 },
+      { label: "BARRED WIN", prefix: "barred-window", count: 14, targetH: 96 },
+      { label: "GLASS WIN", prefix: "glass-window", count: 6, targetH: 96 },
+      { label: "METAL DOOR", prefix: "metal-door", count: 14, targetH: 128 },
+      { label: "GLASS DOOR", prefix: "glass-door", count: 6, targetH: 128 },
+      { label: "BARRED DOOR", prefix: "barred-door", count: 9, targetH: 128 },
+      { label: "GLASS BAR DOOR", prefix: "glass-barred-door", count: 9, targetH: 128 },
+      { label: "TRAFFIC LIGHT", prefix: "traffic-light", count: 8, targetH: 140 },
+      { label: "SEWER GRATE", prefix: "sewer-grate", count: 10, targetH: 48 },
+      { label: "GARBAGE BIN", prefix: "garbage-bin", count: 6, targetH: 64 },
     ];
     const TOTAL = sections.reduce((s, sec) => s + sec.count, 0);
 
@@ -470,7 +582,7 @@ export class GameScene extends Phaser.Scene {
       const startSlot = slot;
       for (let i = 0; i < sec.count; i++) {
         const shortLabel = sec.prefix.charAt(0).toUpperCase() + i;
-        placeAsset(slot++, `${sec.prefix}-${i}`, shortLabel, 180);
+        placeAsset(slot++, `${sec.prefix}-${i}`, shortLabel, sec.targetH);
       }
 
       // Section label along top of wall

@@ -31,7 +31,9 @@ export class BootScene extends Phaser.Scene {
 
     // Tiles
     this.load.image("street", "assets/tilemaps/street_0.png");
-    this.load.image("sidewalk", "assets/tilemaps/sidewalk_speckled.png");
+    for (let i = 0; i < 8; i++) {
+      this.load.image(`sidewalk-${i}`, `assets/tilemaps/sidewalk_${i}.png`);
+    }
     for (let d = 0; d < 6; d++) {
       this.load.image(`door-${d}`, `assets/sprites/door_${d}.png`);
     }

@@ -320,9 +320,9 @@ export class GameScene extends Phaser.Scene {
     const streetLines = this.add.graphics();
     streetLines.setDepth(0.5);
 
-    // Batch ground tile images into blitters (single draw call each)
+    // Batch street tile images into a blitter (single draw call)
     const streetBlitter = this.add.blitter(0, 0, "street").setDepth(0);
-    const sidewalkBlitter = this.add.blitter(0, 0, "sidewalk").setDepth(0.6);
+    const NUM_SIDEWALK_VARIANTS = 8;
 
     for (let row = 0; row < this.mapRows; row++) {
       for (let col = 0; col < this.mapCols; col++) {
@@ -331,7 +331,8 @@ export class GameScene extends Phaser.Scene {
         if (tile === TileType.BUILDING) {
           // Sidewalk ground under buildings (visible through inset gaps)
           const { x, y } = isoToScreen(col, row);
-          sidewalkBlitter.create(x - TILE_W / 2, y - CURB_HEIGHT - TILE_H / 2);
+          const v = Math.floor(this.hash(col, row, 500) * NUM_SIDEWALK_VARIANTS);
+          this.add.image(x, y - CURB_HEIGHT, `sidewalk-${v}`).setDepth(0.6);
 
         } else if (tile === TileType.STREET) {
           const { x, y } = isoToScreen(col, row);
@@ -340,7 +341,8 @@ export class GameScene extends Phaser.Scene {
 
         } else if (tile === TileType.SIDEWALK) {
           const { x, y } = isoToScreen(col, row);
-          sidewalkBlitter.create(x - TILE_W / 2, y - CURB_HEIGHT - TILE_H / 2);
+          const v = Math.floor(this.hash(col, row, 500) * NUM_SIDEWALK_VARIANTS);
+          this.add.image(x, y - CURB_HEIGHT, `sidewalk-${v}`).setDepth(0.6);
           renderSidewalkTile(this, col, row, sidewalkGfx, sidewalkLines);
         }
       }

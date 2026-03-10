@@ -174,4 +174,5 @@ export function renderSidewalkTile(
   if (row % 2 === 0) {
     sidewalkLines.lineBetween(sx, sy - th / 2 - CURB_HEIGHT, sx + tw / 2, sy - CURB_HEIGHT);
   }
+
 }

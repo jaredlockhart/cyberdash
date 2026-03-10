@@ -97,7 +97,7 @@ export class BootScene extends Phaser.Scene {
     for (let i = 0; i < 10; i++) {
       this.load.image(`scraps-${i}`, `assets/sprites/scraps_${i}.png`);
     }
-    for (let i = 0; i < 9; i++) {
+    for (let i = 0; i < 7; i++) {
       this.load.image(`garage-door-${i}`, `assets/sprites/garage_door_${i}.png`);
     }
     // Reprocessed props (no shear)
@@ -112,6 +112,12 @@ export class BootScene extends Phaser.Scene {
     }
     for (let i = 0; i < 10; i++) {
       this.load.image(`dumpster-${i}`, `assets/sprites/dumpster_${i}.png`);
+    }
+    for (let i = 0; i < 10; i++) {
+      this.load.image(`neon-noodle-sign-${i}`, `assets/sprites/neon_noodle_sign_${i}.png`);
+    }
+    for (let i = 0; i < 10; i++) {
+      this.load.image(`neon-dragon-sign-${i}`, `assets/sprites/neon_dragon_sign_${i}.png`);
     }
     for (let v = 0; v < 6; v++) {
       this.load.image(`bldg-top-v${v}`, `assets/tilemaps/bldg_top_v${v}.png`);

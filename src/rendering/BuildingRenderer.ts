@@ -1,6 +1,6 @@
 import Phaser from "phaser";
 import { TILE_W, TILE_H } from "../iso/IsoGeometry";
-import { STORY_HEIGHT } from "../iso/CityLayout";
+import { STORY_HEIGHT, ROW_PERIOD, BLOCK_INTERIOR } from "../iso/CityLayout";
 import { Building, buildingHash } from "./BuildingTypes";
 
 /**
@@ -13,8 +13,6 @@ const DEPTH_WALL_FILL = -0.1;     // flat fill behind textures
 const DEPTH_WALL_TEX = 0;         // wall texture images (base)
 const DEPTH_FEATURE = 0.3;        // doors, windows (on wall surface)
 const DEPTH_STREET_OBJ = 0.6;     // vending machines, garbage bins (in front of wall)
-const DEPTH_BILLBOARD = 1.0;      // billboards (extend outward from wall)
-const DEPTH_BILLBOARD_TEXT = 1.01; // text on billboard face
 import { buildingCorners, tileInsetPosition, computeBuildingMetrics, SLOT_WIDTH, SLOT_GAP, WALL_MARGIN, WIN_TARGET_H, WIN_BOTTOM } from "./BuildingMetrics";
 export type { BuildingMetrics } from "./BuildingMetrics";
 export { computeBuildingMetrics } from "./BuildingMetrics";
@@ -77,8 +75,7 @@ export function renderBuilding(
   const Sr = { x: S.x, y: S.y - wallHeight };
   const Wr = { x: W.x, y: W.y - wallHeight };
 
-  // --- Roof flat fill (covers gaps between tiled diamond images) ---
-
+  // --- Roof ---
   const roofGfx = scene.add.graphics();
   roofGfx.setDepth(depth + DEPTH_ROOF);
   roofGfx.fillStyle(building.color.top, 1);
@@ -90,8 +87,7 @@ export function renderBuilding(
   ], true);
   objects.push(roofGfx);
 
-  // --- Wall flat fills (backdrops behind texture images to cover gaps) ---
-
+  // --- SE wall fill ---
   const seWallGfx = scene.add.graphics();
   seWallGfx.setDepth(building.colEnd + building.rowStart + DEPTH_WALL_FILL);
   seWallGfx.fillStyle(building.color.right, 1);
@@ -103,6 +99,7 @@ export function renderBuilding(
   ], true);
   objects.push(seWallGfx);
 
+  // --- SW wall fill ---
   const swWallGfx = scene.add.graphics();
   swWallGfx.setDepth(building.colStart + building.rowEnd + DEPTH_WALL_FILL);
   swWallGfx.fillStyle(building.color.left, 1);
@@ -114,18 +111,373 @@ export function renderBuilding(
   ], true);
   objects.push(swWallGfx);
 
-  // --- Slot grid for SE wall features (doors & windows) ---
+  // --- Wall textures ---
+  const texStories = Math.max(2, Math.min(4, building.stories));
+  const wallImgHeight = 16 + texStories * STORY_HEIGHT;
+  const scaleY = (wallHeight + 16) / wallImgHeight;
 
+  // SE wall textures
+  for (let row = building.rowStart; row <= building.rowEnd; row++) {
+    const pos = tileInsetPosition(building, building.colEnd, row);
+    const img = scene.add.image(pos.x, pos.y - wallHeight, `wall-right-v${v}-${texStories}s`);
+    img.setOrigin(0, 0).setDepth(building.colEnd + row + DEPTH_WALL_TEX).setTint(building.color.right).setScale(1, scaleY);
+    objects.push(img);
+  }
+
+  // SW wall textures
+  for (let col = building.colStart; col <= building.colEnd; col++) {
+    const pos = tileInsetPosition(building, col, building.rowEnd);
+    const img = scene.add.image(pos.x - TILE_W / 2, pos.y - wallHeight, `wall-left-v${v}-${texStories}s`);
+    img.setOrigin(0, 0).setDepth(col + building.rowEnd + DEPTH_WALL_TEX).setTint(building.color.left).setScale(1, scaleY);
+    objects.push(img);
+  }
+
+  // --- Wall line pattern (brick or vertical slats) ---
+  const wallPattern = buildingHash(building.seed, 52); // 0-1
+  const brickH = 10 + Math.floor(buildingHash(building.seed, 50) * 14); // 10-23px tall
+  const brickW = 16 + Math.floor(buildingHash(building.seed, 51) * 18); // 16-33px wide
+  const lineColor = 0x0a0a0c;
+  const lineAlpha = 0.35;
+  const seWallScreenLen = E.x - S.x;
+  const swWallScreenLen = S.x - W.x;
+
+  // SE wall lines
+  const seBrickGfx = scene.add.graphics();
+  seBrickGfx.setDepth(building.colEnd + building.rowStart + DEPTH_WALL_FILL + 0.05);
+  seBrickGfx.lineStyle(1, lineColor, lineAlpha);
+
+  if (wallPattern < 0.33) {
+    // Vertical slats only
+    const slatW = 24 + Math.floor(buildingHash(building.seed, 53) * 40);
+    for (let along = slatW; along < seWallScreenLen; along += slatW) {
+      const x = S.x + along;
+      const baseY = S.y - along * 0.5;
+      seBrickGfx.lineBetween(x, baseY, x, baseY - wallHeight);
+    }
+  } else if (wallPattern < 0.66) {
+    // Brick pattern
+    const numBrickRows = Math.floor(wallHeight / brickH);
+    for (let y = brickH; y < wallHeight; y += brickH) {
+      seBrickGfx.lineBetween(S.x, S.y - y, E.x, E.y - y);
+    }
+    for (let r = 0; r < numBrickRows; r++) {
+      const rowBottom = r * brickH;
+      const rowTop = Math.min((r + 1) * brickH, wallHeight);
+      const offset = (r % 2 === 0) ? 0 : brickW / 2;
+      for (let along = offset + brickW; along < seWallScreenLen; along += brickW) {
+        const x = S.x + along;
+        const baseY = S.y - along * 0.5;
+        seBrickGfx.lineBetween(x, baseY - rowBottom, x, baseY - rowTop);
+      }
+    }
+  }
+  // else: plain walls, no lines
+  objects.push(seBrickGfx);
+
+  // SW wall lines
+  const swBrickGfx = scene.add.graphics();
+  swBrickGfx.setDepth(building.colStart + building.rowEnd + DEPTH_WALL_FILL + 0.05);
+  swBrickGfx.lineStyle(1, lineColor, lineAlpha);
+
+  if (wallPattern < 0.33) {
+    const slatW = 24 + Math.floor(buildingHash(building.seed, 53) * 40);
+    for (let along = slatW; along < swWallScreenLen; along += slatW) {
+      const x = S.x - along;
+      const baseY = S.y - along * 0.5;
+      swBrickGfx.lineBetween(x, baseY, x, baseY - wallHeight);
+    }
+  } else if (wallPattern < 0.66) {
+    const numBrickRows = Math.floor(wallHeight / brickH);
+    for (let y = brickH; y < wallHeight; y += brickH) {
+      swBrickGfx.lineBetween(S.x, S.y - y, W.x, W.y - y);
+    }
+    for (let r = 0; r < numBrickRows; r++) {
+      const rowBottom = r * brickH;
+      const rowTop = Math.min((r + 1) * brickH, wallHeight);
+      const offset = (r % 2 === 0) ? 0 : brickW / 2;
+      for (let along = offset + brickW; along < swWallScreenLen; along += brickW) {
+        const x = S.x - along;
+        const baseY = S.y - along * 0.5;
+        swBrickGfx.lineBetween(x, baseY - rowBottom, x, baseY - rowTop);
+      }
+    }
+  }
+  objects.push(swBrickGfx);
+
+  // --- Balcony slabs on SE wall (each story above ground floor) ---
+  const BALCONY_OUT = TILE_W;  // two tile widths outward (~64px)
+  const BALCONY_THICK = 4;  // slab thickness (pixels)
+  const RAIL_H = 64;        // railing wall height above slab
+
+  // +row direction in screen coords (normalized to 1px)
+  // Full tile step = (TILE_W/2, TILE_H/2), length = sqrt(32^2 + 16^2) ≈ 35.8
+  const rowDirLen = Math.sqrt((TILE_W / 2) ** 2 + (TILE_H / 2) ** 2);
+  const rowDirX = (TILE_W / 2) / rowDirLen;
+  const rowDirY = (TILE_H / 2) / rowDirLen;
+
+  for (let floor = 1; floor < building.stories; floor++) {
+    const floorY = floor * STORY_HEIGHT;
+
+    // SE wall edge at this floor height: S and E shifted up
+    const sFloor = { x: S.x, y: S.y - floorY };
+    const eFloor = { x: E.x, y: E.y - floorY };
+
+    // Outer edge: shifted outward by BALCONY_OUT along +row
+    const sOut = { x: sFloor.x + rowDirX * BALCONY_OUT, y: sFloor.y + rowDirY * BALCONY_OUT };
+    const eOut = { x: eFloor.x + rowDirX * BALCONY_OUT, y: eFloor.y + rowDirY * BALCONY_OUT };
+
+    const balcGfx = scene.add.graphics();
+    balcGfx.setDepth(depth + DEPTH_FEATURE + 0.1);
+
+    // Top face (roof color)
+    balcGfx.fillStyle(building.color.top, 1);
+    balcGfx.fillPoints([
+      new Phaser.Geom.Point(sFloor.x, sFloor.y),
+      new Phaser.Geom.Point(eFloor.x, eFloor.y),
+      new Phaser.Geom.Point(eOut.x, eOut.y),
+      new Phaser.Geom.Point(sOut.x, sOut.y),
+    ], true);
+
+    // Front face (under the slab, facing camera — SE wall color, slightly darker)
+    balcGfx.fillStyle(building.color.right, 1);
+    balcGfx.fillPoints([
+      new Phaser.Geom.Point(sOut.x, sOut.y),
+      new Phaser.Geom.Point(eOut.x, eOut.y),
+      new Phaser.Geom.Point(eOut.x, eOut.y + BALCONY_THICK),
+      new Phaser.Geom.Point(sOut.x, sOut.y + BALCONY_THICK),
+    ], true);
+
+    // Side face on S corner (small parallelogram closing the slab end)
+    balcGfx.fillStyle(building.color.left, 1);
+    balcGfx.fillPoints([
+      new Phaser.Geom.Point(sFloor.x, sFloor.y),
+      new Phaser.Geom.Point(sOut.x, sOut.y),
+      new Phaser.Geom.Point(sOut.x, sOut.y + BALCONY_THICK),
+      new Phaser.Geom.Point(sFloor.x, sFloor.y + BALCONY_THICK),
+    ], true);
+
+    // --- Railing walls (rise up from slab top) ---
+    // Front railing (along outer edge sOut→eOut, faces camera like SE wall)
+    balcGfx.fillStyle(building.color.right, 1);
+    balcGfx.fillPoints([
+      new Phaser.Geom.Point(sOut.x, sOut.y),
+      new Phaser.Geom.Point(eOut.x, eOut.y),
+      new Phaser.Geom.Point(eOut.x, eOut.y - RAIL_H),
+      new Phaser.Geom.Point(sOut.x, sOut.y - RAIL_H),
+    ], true);
+
+    // S-side railing (sFloor→sOut, faces camera like SW wall)
+    balcGfx.fillStyle(building.color.left, 1);
+    balcGfx.fillPoints([
+      new Phaser.Geom.Point(sFloor.x, sFloor.y),
+      new Phaser.Geom.Point(sOut.x, sOut.y),
+      new Phaser.Geom.Point(sOut.x, sOut.y - RAIL_H),
+      new Phaser.Geom.Point(sFloor.x, sFloor.y - RAIL_H),
+    ], true);
+
+    // E-side railing (eFloor→eOut)
+    balcGfx.fillStyle(building.color.right, 1);
+    balcGfx.fillPoints([
+      new Phaser.Geom.Point(eFloor.x, eFloor.y),
+      new Phaser.Geom.Point(eOut.x, eOut.y),
+      new Phaser.Geom.Point(eOut.x, eOut.y - RAIL_H),
+      new Phaser.Geom.Point(eFloor.x, eFloor.y - RAIL_H),
+    ], true);
+
+    // Horizontal slat lines on railing faces
+    balcGfx.lineStyle(1, lineColor, lineAlpha);
+    const SLAT_SPACING = 8;
+    // Front railing slats (sOut→eOut, slope -0.5)
+    for (let h = SLAT_SPACING; h < RAIL_H; h += SLAT_SPACING) {
+      balcGfx.lineBetween(sOut.x, sOut.y - h, eOut.x, eOut.y - h);
+    }
+    // S-side railing slats (sFloor→sOut, slope +0.5)
+    for (let h = SLAT_SPACING; h < RAIL_H; h += SLAT_SPACING) {
+      balcGfx.lineBetween(sFloor.x, sFloor.y - h, sOut.x, sOut.y - h);
+    }
+    // E-side railing slats (eFloor→eOut, slope +0.5)
+    for (let h = SLAT_SPACING; h < RAIL_H; h += SLAT_SPACING) {
+      balcGfx.lineBetween(eFloor.x, eFloor.y - h, eOut.x, eOut.y - h);
+    }
+
+    objects.push(balcGfx);
+
+    // --- Protruding neon signs mounted on balcony ---
+    // Signs are perpendicular to SE wall (face the +row direction, like S-side railing)
+    // Positioned partway along the balcony outer edge
+
+    const signGfxFlat = scene.add.graphics();
+    signGfxFlat.setDepth(depth + DEPTH_FEATURE + 0.12);
+    const signGfxProtrude = scene.add.graphics();
+    signGfxProtrude.setDepth(depth + DEPTH_FEATURE + 0.18);
+
+    // Sign dimensions (randomized per floor)
+    const sizeR = buildingHash(building.seed, 90 + floor);
+    const H_SIGN_W = 72 + Math.floor(sizeR * 48);       // 72-120
+    const H_SIGN_H = 36 + Math.floor(sizeR * 24);       // 36-60
+    const SIGN_THICK = 3;
+
+    // Signs hang from the front railing, protruding outward (perpendicular to SE wall).
+    // The front railing runs sOut→eOut. Signs extend in +row dir from that edge.
+    // +row screen dir = (TILE_W/2, TILE_H/2) per tile (unnormalized).
+    // Use unnormalized for cleaner pixel math:
+    const outX = TILE_W / 2;  // 32
+    const outY = TILE_H / 2;  // 16
+
+    // 3 signs per balcony in one of two arrangements:
+    // (flush, flush, protruding) or (flush, protruding, flush)
+    const sizeR3 = buildingHash(building.seed, 100 + floor);
+    const F_SIGN_W = 60 + Math.floor(sizeR3 * 40);      // 60-100
+    const F_SIGN_H = 36 + Math.floor(sizeR3 * 24);      // 36-60
+    const arrangement = buildingHash(building.seed, 60 + floor) < 0.5
+      ? [2, 2, 0] : [2, 0, 2];  // 2=flat, 0=protruding (horiz)
+    // One random flush slot gets an image instead of katakana
+    const flatSlots = arrangement.map((t, i) => t === 2 ? i : -1).filter(i => i >= 0);
+    const imageSlot = flatSlots[Math.floor(buildingHash(building.seed, 61 + floor) * flatSlots.length)];
+
+    // Neon border colors
+    const NEON_COLORS = [0xff0066, 0x00ffcc, 0xff6600, 0x00ccff, 0xcc00ff, 0xffcc00, 0x00ff66, 0xff3399];
+
+    // Three thirds of the balcony
+    for (let slot = 0; slot < 3; slot++) {
+      const thirdStart = slot / 3;
+      const thirdEnd = (slot + 1) / 3;
+      const type = arrangement[slot];
+      const neonIdx = Math.floor(buildingHash(building.seed, 110 + floor * 3 + slot) * NEON_COLORS.length);
+      const neon = NEON_COLORS[neonIdx];
+      const contentIdx = (neonIdx + 1 + Math.floor(buildingHash(building.seed, 115 + floor * 3 + slot) * (NEON_COLORS.length - 1))) % NEON_COLORS.length;
+      const contentNeon = NEON_COLORS[contentIdx];
+      let pts: Phaser.Geom.Point[];
+
+      if (type === 2) {
+        // Flat: fill the third, centered
+        const midT = (thirdStart + thirdEnd) / 2;
+        const thirdW = (eOut.x - sOut.x) / 3;
+        const fw = Math.min(F_SIGN_W, thirdW - 8);
+        const fx = sOut.x + midT * (eOut.x - sOut.x) - fw / 2;
+        const fy = sOut.y + midT * (eOut.y - sOut.y) + fw / 2 * 0.5;
+        pts = [
+          new Phaser.Geom.Point(fx, fy),
+          new Phaser.Geom.Point(fx + fw, fy - fw * 0.5),
+          new Phaser.Geom.Point(fx + fw, fy - fw * 0.5 - F_SIGN_H),
+          new Phaser.Geom.Point(fx, fy - F_SIGN_H),
+        ];
+      } else {
+        // Protruding: random position within the third
+        const rand = buildingHash(building.seed, 70 + floor * 3 + slot);
+        const t = thirdStart + 0.05 + rand * (1 / 3 - 0.1);
+        const sx = sOut.x + t * (eOut.x - sOut.x);
+        const sy = sOut.y + t * (eOut.y - sOut.y);
+        const w = H_SIGN_W;
+        const h = H_SIGN_H;
+        pts = [
+          new Phaser.Geom.Point(sx, sy),
+          new Phaser.Geom.Point(sx + w, sy + w * 0.5),
+          new Phaser.Geom.Point(sx + w, sy + w * 0.5 - h),
+          new Phaser.Geom.Point(sx, sy - h),
+        ];
+      }
+
+      // Dark fill + neon border
+      const gfx = type === 2 ? signGfxFlat : signGfxProtrude;
+      const contentDepth = type === 2 ? 0.13 : 0.19;
+      gfx.fillStyle(0x1a1a2e, 1);
+      gfx.fillPoints(pts, true);
+      gfx.lineStyle(2, neon, 1);
+      gfx.strokePoints(pts, true);
+
+      // Sign content: center of the parallelogram
+      const cx = (pts[0].x + pts[1].x + pts[2].x + pts[3].x) / 4;
+      const cy = (pts[0].y + pts[1].y + pts[2].y + pts[3].y) / 4;
+      const signW = Math.abs(pts[1].x - pts[0].x) || Math.abs(pts[2].x - pts[3].x);
+      const signH = Math.abs(pts[0].y - pts[3].y) || Math.abs(pts[1].y - pts[2].y);
+      const neonHex = "#" + contentNeon.toString(16).padStart(6, "0");
+      // Skew: protruding signs follow +col axis (skewY +0.5), flat signs follow SE wall (skewY -0.5)
+      const skewY = type === 2 ? -0.5 : 0.5;
+
+      if (slot === imageSlot) {
+        // This slot gets a noodle bowl or dragon image
+        const isNoodle = buildingHash(building.seed, 130 + floor * 3 + slot) < 0.5;
+        const prefix = isNoodle ? "neon-noodle-sign" : "neon-dragon-sign";
+        const variant = Math.floor(buildingHash(building.seed, 140 + floor * 3 + slot) * 10);
+        const symTexKey = `${prefix}-${variant}`;
+        const frame = scene.textures.getFrame(symTexKey);
+        if (frame) {
+          const imgScale = Math.min((signW * 0.8) / frame.width, (signH * 0.8) / frame.height);
+          const symImg = scene.add.image(cx, cy, symTexKey);
+          symImg.setOrigin(0.5, 0.5).setScale(imgScale).setDepth(depth + DEPTH_FEATURE + contentDepth);
+          (symImg as any).isNeonText = true;
+          objects.push(symImg);
+        }
+      } else {
+        // Katakana characters
+        const KATAKANA = "アイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモヤユヨラリルレロワヲン";
+        const makeSkewedChar = (char: string, fs: number, color: string, skew: number, tag: string) => {
+          const cw = Math.ceil(fs * 1.2);
+          const skewExtra = Math.ceil(cw * Math.abs(skew));
+          const ch = fs + skewExtra + 4;
+          const canvas = document.createElement("canvas");
+          canvas.width = cw;
+          canvas.height = ch;
+          const ctx = canvas.getContext("2d")!;
+          ctx.setTransform(1, skew, 0, 1, 0, skew > 0 ? 0 : skewExtra);
+          ctx.font = `bold ${fs}px sans-serif`;
+          ctx.fillStyle = color;
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          ctx.fillText(char, cw / 2, fs / 2 + 2);
+          const texKey = `sign-${building.colStart}-${building.rowStart}-${floor}-${slot}-${tag}`;
+          if (scene.textures.exists(texKey)) scene.textures.remove(texKey);
+          scene.textures.addCanvas(texKey, canvas);
+          return { texKey, cw, ch };
+        };
+
+        const numChars = 3 + Math.floor(buildingHash(building.seed, 135 + floor * 3 + slot) * 3);
+        const isHoriz = type !== 1;
+        const fontSize = isHoriz
+          ? Math.max(10, Math.floor(Math.min(signW / (numChars + 0.5), signH * 0.7)))
+          : Math.max(10, Math.floor(Math.min(signW * 0.5, signH / (numChars + 0.5))));
+
+        if (isHoriz) {
+          const stepSlope = type === 2 ? -0.5 : 0.5;
+          const half = (numChars - 1) / 2;
+          for (let c = 0; c < numChars; c++) {
+            const ki = Math.floor(buildingHash(building.seed, 160 + floor * 10 + slot * 3 + c) * KATAKANA.length);
+            const { texKey } = makeSkewedChar(KATAKANA[ki], fontSize, neonHex, skewY, `c${c}`);
+            const offset = (c - half) * fontSize;
+            const charImg = scene.add.image(cx + offset, cy + offset * stepSlope, texKey);
+            charImg.setOrigin(0.5, 0.5).setDepth(depth + DEPTH_FEATURE + contentDepth);
+            (charImg as any).isNeonText = true;
+            objects.push(charImg);
+          }
+        } else {
+          const totalH = numChars * fontSize;
+          const startY = cy - totalH / 2 + fontSize / 2;
+          for (let c = 0; c < numChars; c++) {
+            const ki = Math.floor(buildingHash(building.seed, 160 + floor * 10 + slot * 3 + c) * KATAKANA.length);
+            const { texKey } = makeSkewedChar(KATAKANA[ki], fontSize, neonHex, skewY, `c${c}`);
+            const charImg = scene.add.image(cx, startY + c * fontSize, texKey);
+            charImg.setOrigin(0.5, 0.5).setDepth(depth + DEPTH_FEATURE + contentDepth);
+            (charImg as any).isNeonText = true;
+            objects.push(charImg);
+          }
+        }
+      }
+    }
+
+    objects.push(signGfxFlat);
+    objects.push(signGfxProtrude);
+  }
+
+  // --- Slot grid for SE wall features (doors & windows) ---
   const seWallLen = E.x - S.x;
   const usableWidth = seWallLen - 2 * WALL_MARGIN;
   const numSlots = Math.max(1, Math.floor((usableWidth + SLOT_GAP) / (SLOT_WIDTH + SLOT_GAP)));
   const totalSlotsWidth = numSlots * SLOT_WIDTH + (numSlots - 1) * SLOT_GAP;
   const gridStart = WALL_MARGIN + (usableWidth - totalSlotsWidth) / 2;
 
-  // Door slot: leftmost or rightmost based on doorSide
   const doorSlot = building.doorSide === "left" ? 0 : numSlots - 1;
 
-  // Compute slot center positions along the wall
   const slotCenters: number[] = [];
   for (let s = 0; s < numSlots; s++) {
     slotCenters.push(gridStart + s * (SLOT_WIDTH + SLOT_GAP) + SLOT_WIDTH / 2);
@@ -136,71 +488,90 @@ export function renderBuilding(
   const doorY = S.y - doorCenterAlong * 0.5 + TILE_H / 2;
   const doorAlong = doorCenterAlong - SLOT_WIDTH / 2;
 
-  // Each wall gets either a regular door (75%) or a garage door (25%)
   const seHasDoor = buildingHash(building.seed, 40) < 0.75;
+  const NUM_GARAGE = 7;
+  const doorRenderedH = 128;
 
-  // --- Texture images with per-tile depth ---
-
-  const wallImgHeight = 16 + building.stories * STORY_HEIGHT;
-  const scaleY = (wallHeight + 16) / wallImgHeight;
-
-  // SE wall textures (right-face images along colEnd edge)
-  for (let row = building.rowStart; row <= building.rowEnd; row++) {
-    const pos = tileInsetPosition(building, building.colEnd, row);
-    const img = scene.add.image(pos.x, pos.y - wallHeight, `wall-right-v${v}-${building.stories}s`);
-    img.setOrigin(0, 0).setDepth(building.colEnd + row + DEPTH_WALL_TEX).setTint(building.color.right).setScale(1, scaleY);
-    objects.push(img);
-  }
-
-  // SW wall textures (left-face images along rowEnd edge)
-  for (let col = building.colStart; col <= building.colEnd; col++) {
-    const pos = tileInsetPosition(building, col, building.rowEnd);
-    const img = scene.add.image(pos.x - TILE_W / 2, pos.y - wallHeight, `wall-left-v${v}-${building.stories}s`);
-    img.setOrigin(0, 0).setDepth(col + building.rowEnd + DEPTH_WALL_TEX).setTint(building.color.left).setScale(1, scaleY);
-    objects.push(img);
-  }
-
-  // Door image on SE wall (ground floor, door slot) — only when not garage
   if (seHasDoor) {
+    // Door + vending machine on ground floor
     const doorNearT = seWallLen > 0 ? doorAlong / seWallLen : 0;
     const doorNearRow = building.rowEnd + (building.rowStart - building.rowEnd) * doorNearT;
-    const doorImg = scene.add.image(doorX, doorY, `door-${building.doorTexture}`);
-    doorImg.setOrigin(0.5, 1).setDepth(building.colEnd + Math.ceil(doorNearRow) + DEPTH_FEATURE);
+    const doorTexKey = `metal-door-${building.doorTexture}`;
+    const doorFrame = scene.textures.getFrame(doorTexKey);
+    const doorScale = doorFrame ? doorRenderedH / doorFrame.height : 1;
+    const doorImg = scene.add.image(doorX, doorY, doorTexKey);
+    doorImg.setOrigin(0.5, 1).setScale(doorScale).setDepth(building.colEnd + Math.ceil(doorNearRow) + DEPTH_FEATURE);
     objects.push(doorImg);
-  }
 
-  // --- Windows on SE wall (grid-aligned, all floors, tops aligned with door top) ---
-  const VENTS = ["wall-vent-0", "wall-vent-1", "wall-vent-2"];
-  const NUM_GARAGE = 9;
-  const ventKey = VENTS[Math.floor(buildingHash(building.seed, 30) * VENTS.length)];
+    // Vending machine on opposite side of door
+    const VM_H = 96;
+    const vmVariant = Math.floor(buildingHash(building.seed, 21) * 9);
+    const vmKey = `vending-machine-${vmVariant}`;
+    const vmFrame = scene.textures.getFrame(vmKey);
+    if (vmFrame) {
+      const vmSlot = building.doorSide === "left" ? numSlots - 1 : 0;
+      const vmAlong = slotCenters[vmSlot];
+      const vmScale = VM_H / vmFrame.height;
+      const vmX = S.x + vmAlong;
+      const vmBaseY = S.y - vmAlong * 0.5 + TILE_H / 2;
+      const vmNearT = seWallLen > 0 ? vmAlong / seWallLen : 0;
+      const vmNearRow = building.rowEnd + (building.rowStart - building.rowEnd) * vmNearT;
+      const vmImg = scene.add.image(vmX, vmBaseY, vmKey);
+      vmImg.setOrigin(0.5, 1).setScale(vmScale).setDepth(building.colEnd + Math.ceil(vmNearRow) + DEPTH_STREET_OBJ);
+      objects.push(vmImg);
+    }
+  } else {
+    // Garage door spanning two center slots
+    const garageTexKey = `garage-door-${Math.floor(buildingHash(building.seed, 36) * NUM_GARAGE)}`;
+    const gs0 = Math.max(0, Math.floor(numSlots / 2) - 1);
+    const gs1 = Math.min(numSlots - 1, gs0 + 1);
+    const gAlong = (slotCenters[gs0] + slotCenters[gs1]) / 2;
+    const gX = S.x + gAlong;
+    const gBaseY = S.y - gAlong * 0.5 + TILE_H / 2;
+    const gFrame = scene.textures.getFrame(garageTexKey);
+    if (gFrame) {
+      const gScale = doorRenderedH / gFrame.height;
+      const gNearT = seWallLen > 0 ? gAlong / seWallLen : 0;
+      const gNearRow = building.rowEnd + (building.rowStart - building.rowEnd) * gNearT;
+      const gImg = scene.add.image(gX, gBaseY, garageTexKey);
+      gImg.setOrigin(0.5, 1).setScale(gScale, gScale);
+      gImg.setDepth(building.colEnd + Math.ceil(gNearRow) + DEPTH_FEATURE);
+      objects.push(gImg);
+    }
 
-  // Pick slots for special features
-  const nonDoorSlots = seHasDoor
-    ? Array.from({ length: numSlots }, (_, i) => i).filter(i => i !== doorSlot)
-    : Array.from({ length: numSlots }, (_, i) => i);
-
-  // Garage door: two adjacent non-door slots on ground floor
-  const adjacentPairs: number[][] = [];
-  for (let i = 0; i < nonDoorSlots.length - 1; i++) {
-    if (nonDoorSlots[i + 1] - nonDoorSlots[i] === 1) {
-      adjacentPairs.push([nonDoorSlots[i], nonDoorSlots[i + 1]]);
+    // Garbage bin next to garage door
+    const BIN_H = 48;
+    const binVariant = Math.floor(buildingHash(building.seed, 22) * 6);
+    const binKey = `garbage-bin-${binVariant}`;
+    const binFrame = scene.textures.getFrame(binKey);
+    if (binFrame) {
+      const binScale = BIN_H / binFrame.height;
+      const binSlot = gs0 > 0 ? 0 : numSlots - 1;
+      const binAlong = slotCenters[binSlot];
+      const binX = S.x + binAlong;
+      const binBaseY = S.y - binAlong * 0.5 + TILE_H / 2;
+      const binNearT = seWallLen > 0 ? binAlong / seWallLen : 0;
+      const binNearRow = building.rowEnd + (building.rowStart - building.rowEnd) * binNearT;
+      const binImg = scene.add.image(binX, binBaseY, binKey);
+      binImg.setOrigin(0.5, 1).setScale(binScale).setDepth(depth + DEPTH_STREET_OBJ);
+      objects.push(binImg);
     }
   }
-  const garageSlots = (!seHasDoor && adjacentPairs.length > 0)
-    ? adjacentPairs[Math.floor(buildingHash(building.seed, 35) * adjacentPairs.length)] : [];
-  const garageTexKey = `garage-door-${Math.floor(buildingHash(building.seed, 36) * NUM_GARAGE)}`;
-  const garageSet = new Set(garageSlots);
 
-  // Elec box + vent: upper floors only
+  // --- Windows on SE wall (upper floors only) ---
+  const VENTS = ["wall-vent-0", "wall-vent-1", "wall-vent-2"];
+  const ventKey = VENTS[Math.floor(buildingHash(building.seed, 30) * VENTS.length)];
+
+  const allSlots = Array.from({ length: numSlots }, (_, i) => i);
   const upperFloors = Array.from({ length: building.stories - 1 }, (_, i) => i + 1);
-  const elecSlot = nonDoorSlots.length > 0
-    ? nonDoorSlots[Math.floor(buildingHash(building.seed, 31) * nonDoorSlots.length)] : -1;
+  const elecSlot = allSlots.length > 0
+    ? allSlots[Math.floor(buildingHash(building.seed, 31) * allSlots.length)] : -1;
   const elecFloor = upperFloors.length > 0
     ? upperFloors[Math.floor(buildingHash(building.seed, 32) * upperFloors.length)] : -1;
   const ventFloorOptions = upperFloors.filter(i => i !== elecFloor);
   if (ventFloorOptions.length === 0 && upperFloors.length > 0) ventFloorOptions.push(upperFloors[0]);
   const ventFloor = ventFloorOptions[Math.floor(buildingHash(building.seed, 33) * ventFloorOptions.length)];
-  const ventSlotOptions = nonDoorSlots.filter(s => !(s === elecSlot && ventFloor === elecFloor));
+  const ventSlotOptions = allSlots.filter(s => !(s === elecSlot && ventFloor === elecFloor));
   const ventSlot = ventSlotOptions.length > 0
     ? ventSlotOptions[Math.floor(buildingHash(building.seed, 34) * ventSlotOptions.length)] : -1;
 
@@ -210,33 +581,11 @@ export function renderBuilding(
   const texH = probe?.height ?? 128;
   const winScale = Math.min(WIN_TARGET_H / texH, SLOT_WIDTH / texW);
 
-  const doorRenderedH = 128;
-
-  // Render garage door spanning two slots
-  if (garageSlots.length === 2) {
-    const gAlong = (slotCenters[garageSlots[0]] + slotCenters[garageSlots[1]]) / 2;
-    const gX = S.x + gAlong;
-    const gBaseY = S.y - gAlong * 0.5 + TILE_H / 2;
-    const gFrame = scene.textures.getFrame(garageTexKey);
-    if (gFrame) {
-      const garageW = SLOT_WIDTH * 2 + SLOT_GAP;
-      const gScale = Math.min(doorRenderedH / gFrame.height, garageW / gFrame.width);
-      const gNearT = seWallLen > 0 ? (gAlong - garageW / 2) / seWallLen : 0;
-      const gNearRow = building.rowEnd + (building.rowStart - building.rowEnd) * gNearT;
-      const gImg = scene.add.image(gX, gBaseY, garageTexKey);
-      gImg.setOrigin(0.5, 1).setScale(gScale, gScale);
-      gImg.setDepth(building.colEnd + Math.ceil(gNearRow) + DEPTH_FEATURE);
-      objects.push(gImg);
-    }
-  }
-
   for (let floor = 0; floor < building.stories; floor++) {
     const floorY = floor * STORY_HEIGHT;
 
     for (let s = 0; s < numSlots; s++) {
-      // Ground floor: skip door slot (if door) or garage slots (if garage)
-      if (floor === 0 && seHasDoor && s === doorSlot) continue;
-      if (floor === 0 && garageSet.has(s)) continue;
+      if (floor === 0) continue; // no windows on ground floor
 
       const along = slotCenters[s];
       const winX = S.x + along;
@@ -263,8 +612,10 @@ export function renderBuilding(
     }
   }
 
-  // --- Windows on SW wall (grid-aligned, all floors, flipped) ---
-  // Each SW wall also gets 1 elec box + 1 vent
+  // --- SW wall features (only on the building at the SW edge of the block) ---
+  const isSWEdge = building.rowEnd % ROW_PERIOD === BLOCK_INTERIOR.rowEnd;
+  if (!isSWEdge) { /* skip SW wall features */ } else {
+
   const swVentKey = VENTS[Math.floor(buildingHash(building.seed, 130) * VENTS.length)];
 
   const swWallLen = S.x - W.x;
@@ -281,75 +632,71 @@ export function renderBuilding(
 
     const swAllSlots = Array.from({ length: swNumSlots }, (_, i) => i);
 
-    // Each SW wall gets either a regular door (75%) or garage door (25%)
-    const swHasDoor = buildingHash(building.seed, 41) < 0.75;
-    const swDoorSlot = Math.floor(buildingHash(building.seed, 42) * swNumSlots);
-    const swDoorTexture = Math.floor(buildingHash(building.seed, 43) * 6);
-
-    const swNonDoorSlots = swHasDoor
-      ? swAllSlots.filter(i => i !== swDoorSlot)
-      : swAllSlots;
-
-    // Garage door: two adjacent non-door slots on ground floor
-    const swAdjacentPairs: number[][] = [];
-    for (let i = 0; i < swNonDoorSlots.length - 1; i++) {
-      if (swNonDoorSlots[i + 1] - swNonDoorSlots[i] === 1) {
-        swAdjacentPairs.push([swNonDoorSlots[i], swNonDoorSlots[i + 1]]);
+    // --- SW ground floor: garage doors, vending machines, trash cans ---
+    const swSkip = new Set<number>();
+    for (let s = 0; s < swNumSlots; s++) {
+      if (swSkip.has(s)) continue;
+      const along = swSlotCenters[s];
+      const objX = S.x - along;
+      const objBaseY = S.y - along * 0.5 + TILE_H / 2;
+      const roll = buildingHash(building.seed, 140 + s);
+      if (roll < 0.15 && s + 1 < swNumSlots && !swSkip.has(s + 1)) {
+        swSkip.add(s + 1);
+        // Garage door
+        const gIdx = Math.floor(buildingHash(building.seed, 150 + s) * NUM_GARAGE);
+        const gKey = `garage-door-${gIdx}`;
+        const gFrame = scene.textures.getFrame(gKey);
+        if (gFrame) {
+          const gScale = doorRenderedH / gFrame.height;
+          const gImg = scene.add.image(objX, objBaseY, gKey);
+          gImg.setOrigin(0.5, 1).setScale(gScale, gScale).setFlipX(true);
+          gImg.setDepth(depth + DEPTH_FEATURE);
+          objects.push(gImg);
+        }
+      } else if (roll < 0.55) {
+        // Vending machine
+        const vmIdx = Math.floor(buildingHash(building.seed, 160 + s) * 9);
+        const vmKey = `vending-machine-${vmIdx}`;
+        const vmFrame = scene.textures.getFrame(vmKey);
+        if (vmFrame) {
+          const vmScale = 96 / vmFrame.height;
+          const vmImg = scene.add.image(objX, objBaseY, vmKey);
+          vmImg.setOrigin(0.5, 1).setScale(vmScale).setFlipX(true);
+          vmImg.setDepth(depth + DEPTH_STREET_OBJ);
+          objects.push(vmImg);
+        }
+      } else {
+        // Garbage bin
+        const binIdx = Math.floor(buildingHash(building.seed, 170 + s) * 6);
+        const binKey = `garbage-bin-${binIdx}`;
+        const binFrame = scene.textures.getFrame(binKey);
+        if (binFrame) {
+          const binScale = 48 / binFrame.height;
+          const binImg = scene.add.image(objX, objBaseY, binKey);
+          binImg.setOrigin(0.5, 1).setScale(binScale).setFlipX(true);
+          binImg.setDepth(depth + DEPTH_STREET_OBJ);
+          objects.push(binImg);
+        }
       }
     }
-    const swGarageSlots = (!swHasDoor && swAdjacentPairs.length > 0)
-      ? swAdjacentPairs[Math.floor(buildingHash(building.seed, 135) * swAdjacentPairs.length)] : [];
-    const swGarageTexKey = `garage-door-${Math.floor(buildingHash(building.seed, 136) * NUM_GARAGE)}`;
-    const swGarageSet = new Set(swGarageSlots);
 
-    // Elec box + vent on upper floors
-    const swElecSlot = swNonDoorSlots.length > 0
-      ? swNonDoorSlots[Math.floor(buildingHash(building.seed, 131) * swNonDoorSlots.length)] : -1;
+    const swElecSlot = swAllSlots.length > 0
+      ? swAllSlots[Math.floor(buildingHash(building.seed, 131) * swAllSlots.length)] : -1;
     const swUpperFloors = Array.from({ length: building.stories - 1 }, (_, i) => i + 1);
     const swElecFloor = swUpperFloors.length > 0
       ? swUpperFloors[Math.floor(buildingHash(building.seed, 132) * swUpperFloors.length)] : -1;
     const swVentFloorOpts = swUpperFloors.filter(i => i !== swElecFloor);
     if (swVentFloorOpts.length === 0 && swUpperFloors.length > 0) swVentFloorOpts.push(swUpperFloors[0]);
     const swVentFloor = swVentFloorOpts[Math.floor(buildingHash(building.seed, 133) * swVentFloorOpts.length)];
-    const swVentSlotOpts = swNonDoorSlots.filter(s => !(s === swElecSlot && swVentFloor === swElecFloor));
+    const swVentSlotOpts = swAllSlots.filter(s => !(s === swElecSlot && swVentFloor === swElecFloor));
     const swVentSlot = swVentSlotOpts.length > 0
       ? swVentSlotOpts[Math.floor(buildingHash(building.seed, 134) * swVentSlotOpts.length)] : -1;
-
-    // Render SW door (if door) or SW garage door (if garage)
-    if (swHasDoor) {
-      const swDoorAlong = swSlotCenters[swDoorSlot];
-      const swDoorX = S.x - swDoorAlong;
-      const swDoorBaseY = S.y - swDoorAlong * 0.5 + TILE_H / 2;
-      const swDoorNearT = swWallLen > 0 ? (swDoorAlong - SLOT_WIDTH / 2) / swWallLen : 0;
-      const swDoorNearCol = building.colEnd + (building.colStart - building.colEnd) * swDoorNearT;
-      const swDoorImg = scene.add.image(swDoorX, swDoorBaseY, `door-${swDoorTexture}`);
-      swDoorImg.setOrigin(0.5, 1).setFlipX(true);
-      swDoorImg.setDepth(Math.ceil(swDoorNearCol) + building.rowEnd + DEPTH_FEATURE);
-      objects.push(swDoorImg);
-    } else if (swGarageSlots.length === 2) {
-      const gAlong = (swSlotCenters[swGarageSlots[0]] + swSlotCenters[swGarageSlots[1]]) / 2;
-      const gX = S.x - gAlong;
-      const gBaseY = S.y - gAlong * 0.5 + TILE_H / 2;
-      const gFrame = scene.textures.getFrame(swGarageTexKey);
-      if (gFrame) {
-        const garageW = SLOT_WIDTH * 2 + SLOT_GAP;
-        const gScale = Math.min(doorRenderedH / gFrame.height, garageW / gFrame.width);
-        const gNearT = swWallLen > 0 ? (gAlong - garageW / 2) / swWallLen : 0;
-        const gNearCol = building.colEnd + (building.colStart - building.colEnd) * gNearT;
-        const gImg = scene.add.image(gX, gBaseY, swGarageTexKey);
-        gImg.setOrigin(0.5, 1).setScale(gScale, gScale).setFlipX(true);
-        gImg.setDepth(Math.ceil(gNearCol) + building.rowEnd + DEPTH_FEATURE);
-        objects.push(gImg);
-      }
-    }
 
     for (let floor = 0; floor < building.stories; floor++) {
       const floorY = floor * STORY_HEIGHT;
 
       for (let s = 0; s < swNumSlots; s++) {
-        // Ground floor: skip door slot (if door) or garage slots (if garage)
-        if (floor === 0 && swHasDoor && s === swDoorSlot) continue;
-        if (floor === 0 && swGarageSet.has(s)) continue;
+        if (floor === 0) continue; // no windows/doors on ground floor
 
         const along = swSlotCenters[s];
         const winX = S.x - along;
@@ -377,208 +724,6 @@ export function renderBuilding(
       }
     }
   }
-
-  // --- Billboard perpendicular to SE wall (second floor level) ---
-  // Extends outward from wall along +col axis (slope +0.5 in screen)
-  // One story tall, positioned at second floor height
-
-  const BB_EXTENT = 48;  // how far billboard sticks out (screen x pixels)
-  const BB_DEPTH = 10;   // thickness (screen pixels along +row axis)
-
-  // Position between rightmost slot and wall edge (NE end of SE wall)
-  const lastSlotRight = slotCenters[numSlots - 1] + SLOT_WIDTH / 2;
-  const bbAlong = (lastSlotRight + seWallLen) / 2;
-  const bbX = S.x + bbAlong;
-  const bbBaseY = S.y - bbAlong * 0.5 + TILE_H / 2;
-
-  // Varying height: 1.0x to 1.5x of one story, deterministic per building
-  const bbHeightMult = 1.0 + 0.5 * buildingHash(building.seed, 10);
-  const bbHeight = STORY_HEIGHT * bbHeightMult;
-
-  // Second floor level: bottom of billboard is one story up from ground
-  const bbBottom = bbBaseY - STORY_HEIGHT;
-  const bbTop = bbBottom - bbHeight;
-
-  // Col axis extent: slope +0.5
-  const bbExtY = BB_EXTENT * 0.5;
-
-  // Thickness extends in -row direction (toward NE, away from camera)
-  // so the visible front face faces SW (toward camera, like SW walls)
-  const bbDx = BB_DEPTH;          // -row in screen: +x
-  const bbDy = -BB_DEPTH * 0.5;   // -row in screen: -y
-
-  // Random dark grey base color, deterministic per building
-  const bbBase = 0x0a + Math.floor(buildingHash(building.seed, 11) * 16);  // 0x0a to 0x1a
-  const bbFront = (bbBase << 16) | (bbBase << 8) | bbBase;
-  const bbTopCol = ((bbBase + 0x08) << 16) | ((bbBase + 0x08) << 8) | (bbBase + 0x08);
-  const bbEdgeCol = ((bbBase - 0x04) << 16) | ((bbBase - 0x04) << 8) | (bbBase - 0x04);
-
-  const bbGfx = scene.add.graphics();
-
-  // Top face (lighter)
-  bbGfx.fillStyle(bbTopCol, 1);
-  bbGfx.fillPoints([
-    new Phaser.Geom.Point(bbX, bbTop),
-    new Phaser.Geom.Point(bbX + BB_EXTENT, bbTop + bbExtY),
-    new Phaser.Geom.Point(bbX + BB_EXTENT + bbDx, bbTop + bbExtY + bbDy),
-    new Phaser.Geom.Point(bbX + bbDx, bbTop + bbDy),
-  ], true);
-
-  // Outer edge (SE-facing — darker)
-  bbGfx.fillStyle(bbEdgeCol, 1);
-  bbGfx.fillPoints([
-    new Phaser.Geom.Point(bbX + BB_EXTENT, bbTop + bbExtY),
-    new Phaser.Geom.Point(bbX + BB_EXTENT + bbDx, bbTop + bbExtY + bbDy),
-    new Phaser.Geom.Point(bbX + BB_EXTENT + bbDx, bbBottom + bbExtY + bbDy),
-    new Phaser.Geom.Point(bbX + BB_EXTENT, bbBottom + bbExtY),
-  ], true);
-
-  // Front face (SW-facing — the sign surface)
-  bbGfx.fillStyle(bbFront, 1);
-  bbGfx.fillPoints([
-    new Phaser.Geom.Point(bbX, bbTop),
-    new Phaser.Geom.Point(bbX + BB_EXTENT, bbTop + bbExtY),
-    new Phaser.Geom.Point(bbX + BB_EXTENT, bbBottom + bbExtY),
-    new Phaser.Geom.Point(bbX, bbBottom),
-  ], true);
-
-  // Depth: billboard extends from colEnd outward, use mid-row for sorting
-  const bbT = seWallLen > 0 ? bbAlong / seWallLen : 0;
-  const bbNearRow = building.rowEnd + (building.rowStart - building.rowEnd) * bbT;
-  const bbDepth = building.colEnd + building.rowEnd + DEPTH_BILLBOARD;
-  bbGfx.setDepth(bbDepth);
-  objects.push(bbGfx);
-
-  // --- Vertical Japanese text on billboard face (iso-skewed) ---
-  const KANJI = '電光夜闇風雷火水星月刃龍鬼魂影神力速街道店酒薬肉麺飯茶';
-  const NEON = [0xff1493, 0x00ffff, 0x39ff14, 0xff6600, 0xbf00ff, 0xff0033, 0xffff00, 0x0066ff];
-
-  const numChars = bbHeightMult >= 1.25 ? 3 : 2;
-  const neonHex = NEON[Math.floor(buildingHash(building.seed, 12) * NEON.length)];
-  const neonStr = '#' + neonHex.toString(16).padStart(6, '0');
-
-  // Center line of billboard face
-  const bbCenterX = bbX + BB_EXTENT / 2;
-  const bbFaceMidTopY = bbTop + bbExtY / 2;
-  const bbFaceH = bbBottom - bbTop;
-
-  const charPad = 16;
-  const charSlotH = (bbFaceH - charPad * 2) / numChars;
-  const fontSize = Math.floor(charSlotH * 0.65);
-
-  for (let i = 0; i < numChars; i++) {
-    const ci = Math.floor(buildingHash(building.seed, 13 + i) * KANJI.length);
-    const char = KANJI[ci];
-
-    // Render character onto a canvas with skewY to match col axis slope +0.5
-    const cw = Math.ceil(fontSize * 1.2);
-    const skewExtra = Math.ceil(cw * 0.5);
-    const ch = fontSize + skewExtra + 4;
-    const canvas = document.createElement('canvas');
-    canvas.width = cw;
-    canvas.height = ch;
-    const ctx = canvas.getContext('2d')!;
-
-    // setTransform(a, b, c, d, e, f): (x,y) → (ax+cy+e, bx+dy+f)
-    // skewY of 0.5 matches the +col axis slope
-    ctx.setTransform(1, 0.5, 0, 1, 0, 0);
-    ctx.font = `bold ${fontSize}px sans-serif`;
-    ctx.fillStyle = neonStr;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(char, cw / 2, fontSize / 2 + 2);
-
-    const texKey = `bb-${building.colStart}-${building.rowStart}-${i}`;
-    if (scene.textures.exists(texKey)) scene.textures.remove(texKey);
-    scene.textures.addCanvas(texKey, canvas);
-
-    const charY = bbFaceMidTopY + charPad + (i + 0.5) * charSlotH;
-    const charImg = scene.add.image(bbCenterX, charY, texKey);
-    charImg.setOrigin(0.5, 0.5);
-    charImg.setDepth(building.colEnd + building.rowEnd + DEPTH_BILLBOARD_TEXT);
-    (charImg as any).isNeonText = true;
-    objects.push(charImg);
-  }
-
-  // --- Street-level object per building (vending machine or garbage bin) ---
-  const streetObjType = buildingHash(building.seed, 20) < 0.5 ? 0 : 1;
-  if (streetObjType === 0) {
-    // Vending machine under billboard
-    const VM_H = 96;
-    const vmVariant = Math.floor(buildingHash(building.seed, 21) * 9);
-    const vmKey = `vending-machine-${vmVariant}`;
-    const vmFrame = scene.textures.getFrame(vmKey);
-    if (vmFrame) {
-      const vmScale = VM_H / vmFrame.height;
-      const vmRenderedW = vmFrame.width * vmScale;
-      const vmX = bbX + vmRenderedW / 2;
-      const vmY = bbBaseY;
-      const vmImg = scene.add.image(vmX, vmY, vmKey);
-      vmImg.setOrigin(0.5, 1).setScale(vmScale).setDepth(depth + DEPTH_STREET_OBJ);
-      objects.push(vmImg);
-    }
-  } else {
-    // Garbage bin flush against wall, far from door (opposite end of SE wall)
-    const BIN_H = 48;
-    const binVariant = Math.floor(buildingHash(building.seed, 22) * 6);
-    const binKey = `garbage-bin-${binVariant}`;
-    const binFrame = scene.textures.getFrame(binKey);
-    if (binFrame) {
-      const binScale = BIN_H / binFrame.height;
-      const binRenderedW = binFrame.width * binScale;
-      // Place at the opposite end of the wall from the door
-      const binAlong = building.doorSide === "left"
-        ? seWallLen - WALL_MARGIN - binRenderedW / 2
-        : WALL_MARGIN + binRenderedW / 2;
-      const binX = S.x + binAlong;
-      const binY = S.y - binAlong * 0.5 + TILE_H / 2;
-      const binNearT = seWallLen > 0 ? binAlong / seWallLen : 0;
-      const binNearRow = building.rowEnd + (building.rowStart - building.rowEnd) * binNearT;
-      const binImg = scene.add.image(binX, binY, binKey);
-      binImg.setOrigin(0.5, 1).setScale(binScale).setDepth(depth + DEPTH_STREET_OBJ);
-      objects.push(binImg);
-    }
-  }
-
-  // --- Street-level object on SW wall (flipped) ---
-  const swStreetObjType = buildingHash(building.seed, 23) < 0.5 ? 0 : 1;
-  if (swStreetObjType === 0) {
-    // Vending machine on SW wall
-    const SW_VM_H = 96;
-    const swVmVariant = Math.floor(buildingHash(building.seed, 24) * 9);
-    const swVmKey = `vending-machine-${swVmVariant}`;
-    const swVmFrame = scene.textures.getFrame(swVmKey);
-    if (swVmFrame) {
-      const swVmScale = SW_VM_H / swVmFrame.height;
-      const swVmRenderedW = swVmFrame.width * swVmScale;
-      // Place near one end of SW wall
-      const swVmAlong = swWallLen - WALL_MARGIN - swVmRenderedW / 2;
-      const swVmX = S.x - swVmAlong - swVmRenderedW / 2;
-      const swVmY = S.y - swVmAlong * 0.5 + TILE_H / 2;
-      const swVmNearT = swWallLen > 0 ? swVmAlong / swWallLen : 0;
-      const swVmNearCol = building.colEnd + (building.colStart - building.colEnd) * swVmNearT;
-      const swVmImg = scene.add.image(swVmX, swVmY, swVmKey);
-      swVmImg.setOrigin(0.5, 1).setScale(swVmScale).setFlipX(true).setDepth(depth + DEPTH_STREET_OBJ);
-      objects.push(swVmImg);
-    }
-  } else {
-    // Garbage bin on SW wall
-    const SW_BIN_H = 48;
-    const swBinVariant = Math.floor(buildingHash(building.seed, 25) * 6);
-    const swBinKey = `garbage-bin-${swBinVariant}`;
-    const swBinFrame = scene.textures.getFrame(swBinKey);
-    if (swBinFrame) {
-      const swBinScale = SW_BIN_H / swBinFrame.height;
-      const swBinAlong = WALL_MARGIN + swBinFrame.width * swBinScale / 2;
-      const swBinX = S.x - swBinAlong;
-      const swBinY = S.y - swBinAlong * 0.5 + TILE_H / 2;
-      const swBinNearT = swWallLen > 0 ? swBinAlong / swWallLen : 0;
-      const swBinNearCol = building.colEnd + (building.colStart - building.colEnd) * swBinNearT;
-      const swBinImg = scene.add.image(swBinX, swBinY, swBinKey);
-      swBinImg.setOrigin(0.5, 1).setScale(swBinScale).setFlipX(true).setDepth(depth + DEPTH_STREET_OBJ);
-      objects.push(swBinImg);
-    }
-  }
-
+  } // end isSWEdge
   return objects;
 }
